@@ -7,6 +7,12 @@
 // DEBE ser la primera línea antes de cualquier otro import
 require("dotenv").config();
 
+// Validate required environment variables
+if (!process.env.MONGO_URI) {
+  console.error("ERROR: MONGO_URI is not defined. Set it in .env or environment variables.");
+  process.exit(1);
+}
+
 // Importamos Express, el framework que nos permite crear el servidor HTTP
 const express = require("express");
 
@@ -44,6 +50,11 @@ app.get("/", (req, res) => {
   res.send("Argus backend active");
 });
 
+// Health check
+app.get("/health", (req, res) => {
+  res.status(200).json({ status: "ok" });
+});
+
 // Montamos todas las rutas GPS bajo el prefijo /api/gps
 // Esto significa que /api/gps llama a las rutas definidas en routes/gps.js
 app.use("/api/gps", gpsRoutes);
@@ -56,6 +67,6 @@ app.use((req, res) => {
 
 // ── Iniciar el servidor ──────────────────────────────────────
 // El servidor empieza a escuchar peticiones en el puerto definido
-app.listen(PORT, () => {
-  console.log(`🚀 Servidor Argus corriendo en http://localhost:${PORT}`);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Argus backend running on port ${PORT}`);
 });
