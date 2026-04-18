@@ -23,7 +23,6 @@ const gpsRoutes = require("./routes/gps");
 const app = express();
 
 // ── Puerto del servidor ──────────────────────────────────────
-// Usa el puerto definido en .env o el 3000 por defecto
 const PORT = process.env.PORT || 3000;
 
 // ── Conexión a la base de datos ──────────────────────────────
