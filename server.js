@@ -25,6 +25,9 @@ const connectDB = require("./config/db");
 // Importamos las rutas del módulo GPS
 const gpsRoutes = require("./routes/gps");
 
+const { startTcpServer } = require("./tcp/tcpServer");
+const { startWorker } = require("./tcp/queue");
+
 // ── Inicialización de la app Express ────────────────────────
 const app = express();
 
@@ -34,6 +37,10 @@ const PORT = process.env.PORT || 3000;
 // ── Conexión a la base de datos ──────────────────────────────
 // Llamamos a la función async que establece la conexión con MongoDB
 connectDB();
+
+// ── TCP ingestion layer ──────────────────────────────────────
+startWorker();
+startTcpServer();
 
 // ── Middlewares globales ─────────────────────────────────────
 // Permite que Express entienda el body de las peticiones en formato JSON
@@ -70,3 +77,4 @@ app.use((req, res) => {
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Argus backend running on port ${PORT}`);
 });
+
