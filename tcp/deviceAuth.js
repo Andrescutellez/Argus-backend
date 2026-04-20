@@ -1,5 +1,3 @@
-const crypto = require('crypto');
-
 const SECRET = process.env.TCP_SECRET || 'argus-dev-secret';
 
 // Comma-separated device IDs in env: ALLOWED_DEVICES=ESP32-001,ESP32-002
@@ -14,23 +12,26 @@ function isAllowed(deviceId) {
   return ALLOWED_DEVICES.has(deviceId);
 }
 
-// Device computes: HMAC-SHA256(deviceId|timestamp|lat|lng, secret).slice(0,16)
+function crc32Argus(text) {
+  let crc = 0xffffffff;
+  for (let i = 0; i < text.length; i += 1) {
+    crc ^= text.charCodeAt(i);
+    for (let bit = 0; bit < 8; bit += 1) {
+      const mask = -(crc & 1);
+      crc = (crc >>> 1) ^ (0xedb88320 & mask);
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
 function verifySignature(deviceId, timestamp, lat, lng, signature) {
-  const payload = `${deviceId}|${timestamp}|${lat}|${lng}`;
-  const expected = crypto
-    .createHmac('sha256', SECRET)
-    .update(payload)
-    .digest('hex')
-    .slice(0, 16);
-  // constant-time compare to prevent timing attacks
-  try {
-    return crypto.timingSafeEqual(
-      Buffer.from(expected, 'utf8'),
-      Buffer.from(signature.slice(0, 16).padEnd(16, '\0'), 'utf8')
-    );
-  } catch {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
     return false;
   }
+
+  const payload = `${deviceId}|${timestamp}|${lat.toFixed(6)}|${lng.toFixed(6)}|${SECRET}`;
+  const expected = crc32Argus(payload).toString(16).toUpperCase().padStart(8, '0');
+  return expected === String(signature || '').trim().toUpperCase();
 }
 
 module.exports = { isAllowed, verifySignature };

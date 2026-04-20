@@ -52,21 +52,21 @@ function createTcpServer() {
         const packet = parsePacket(line);
         if (!packet) {
           log('warn', 'tcp.packet.malformed', { remote, raw: line.slice(0, 100) });
-          socket.write('ERR|MALFORMED\n');
+          socket.write('ERR\n');
           continue;
         }
 
         // --- Device auth ---
         if (!isAllowed(packet.deviceId)) {
           log('warn', 'tcp.auth.unknown_device', { deviceId: packet.deviceId, remote });
-          socket.write('ERR|UNAUTHORIZED\n');
+          socket.write('ERR\n');
           socket.destroy();
           return;
         }
 
         if (!verifySignature(packet.deviceId, packet.timestamp, packet.lat, packet.lng, packet.signature)) {
           log('warn', 'tcp.auth.bad_signature', { deviceId: packet.deviceId, remote });
-          socket.write('ERR|UNAUTHORIZED\n');
+          socket.write('ERR\n');
           socket.destroy();
           return;
         }
@@ -76,7 +76,7 @@ function createTcpServer() {
         const last = lastSeen.get(packet.deviceId) || 0;
         if (now - last < RATE_LIMIT_MS) {
           log('warn', 'tcp.ratelimit', { deviceId: packet.deviceId, msSinceLast: now - last });
-          socket.write('ERR|RATE_LIMIT\n');
+          socket.write('ERR\n');
           continue;
         }
         lastSeen.set(packet.deviceId, now);
@@ -93,7 +93,7 @@ function createTcpServer() {
         const { lat, lng } = packet;
         if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
           log('warn', 'tcp.packet.invalid_coords', { deviceId, lat, lng });
-          socket.write('ERR|INVALID_COORDS\n');
+          socket.write('ERR\n');
           continue;
         }
 
