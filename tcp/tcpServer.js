@@ -3,7 +3,7 @@ const { log } = require('./logger');
 const { isAllowed, verifySignature } = require('./deviceAuth');
 const { enqueue } = require('./queue');
 
-const TCP_PORT = parseInt(process.env.TCP_PORT || '9000', 10);
+const TCP_PORT = parseInt(process.env.TCP_PORT || '80', 10);
 const INACTIVITY_TIMEOUT_MS = 60_000;
 const RATE_LIMIT_MS = 5_000;
 
@@ -37,38 +37,58 @@ function createTcpServer() {
     log('info', 'tcp.connect', { remote });
 
     socket.setTimeout(INACTIVITY_TIMEOUT_MS);
+      socket.setKeepAlive && socket.setKeepAlive(true, 30000);
 
     let buffer = '';
     let deviceId = null; // set after first successful auth
+      let failedAuthAttempts = 0;
+      const MAX_FAILED_AUTH = 3;
 
     socket.on('data', (chunk) => {
+      // Log raw incoming bytes and UTF-8 interpretation for debugging
+      try {
+        log('debug', 'tcp.raw', { remote, rawHex: chunk.toString('hex'), rawUtf8: chunk.toString('utf8') });
+      } catch (e) {
+        // ignore logging failures
+      }
+
       buffer += chunk.toString('utf8');
-      const lines = buffer.split('\n');
+      const lines = buffer.split(/\r?\n/);
       buffer = lines.pop(); // retain incomplete trailing line
 
       for (const line of lines) {
-        if (!line.trim()) continue;
+        if (!line || !line.trim()) continue;
 
         const packet = parsePacket(line);
         if (!packet) {
           log('warn', 'tcp.packet.malformed', { remote, raw: line.slice(0, 100) });
-          socket.write('ERR\n');
+          socket.write('ERR\r\n');
           continue;
         }
 
         // --- Device auth ---
         if (!isAllowed(packet.deviceId)) {
           log('warn', 'tcp.auth.unknown_device', { deviceId: packet.deviceId, remote });
-          socket.write('ERR\n');
-          socket.destroy();
-          return;
+          failedAuthAttempts += 1;
+          socket.write('ERR\r\n');
+          if (failedAuthAttempts >= MAX_FAILED_AUTH) {
+            log('warn', 'tcp.auth.max_attempts', { remote, attempts: failedAuthAttempts });
+            socket.destroy();
+            return;
+          }
+          continue;
         }
 
         if (!verifySignature(packet.deviceId, packet.timestamp, packet.lat, packet.lng, packet.signature)) {
           log('warn', 'tcp.auth.bad_signature', { deviceId: packet.deviceId, remote });
-          socket.write('ERR\n');
-          socket.destroy();
-          return;
+          failedAuthAttempts += 1;
+          socket.write('ERR\r\n');
+          if (failedAuthAttempts >= MAX_FAILED_AUTH) {
+            log('warn', 'tcp.auth.max_attempts', { remote, attempts: failedAuthAttempts });
+            socket.destroy();
+            return;
+          }
+          continue;
         }
 
         // --- Rate limit ---
@@ -93,7 +113,7 @@ function createTcpServer() {
         const { lat, lng } = packet;
         if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
           log('warn', 'tcp.packet.invalid_coords', { deviceId, lat, lng });
-          socket.write('ERR\n');
+          socket.write('ERR\r\n');
           continue;
         }
 
@@ -105,7 +125,7 @@ function createTcpServer() {
           timestamp: new Date(Number(packet.timestamp) || now),
         });
 
-        socket.write('ACK\n');
+        socket.write('ACK\r\n');
         log('info', 'tcp.packet.accepted', { deviceId, lat, lng });
 
         flushCommands(socket, deviceId);
