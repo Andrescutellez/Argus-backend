@@ -31,7 +31,7 @@ function flushCommands(socket, deviceId) {
   log('info', 'tcp.cmd.sent', { deviceId, cmd });
 }
 
-function createTcpServer() {
+function createTcpServer(io) {
   const server = net.createServer((socket) => {
     const remote = `${socket.remoteAddress}:${socket.remotePort}`;
     log('info', 'tcp.connect', { remote });
@@ -125,6 +125,17 @@ function createTcpServer() {
           timestamp: new Date(Number(packet.timestamp) || now),
         });
 
+        // --- Real-time push to connected app clients ---
+        if (io) {
+          io.emit('gps:update', {
+            deviceId,
+            lat,
+            lon: lng,
+            speed: 0,
+            timestamp: new Date(Number(packet.timestamp) || now).toISOString(),
+          });
+        }
+
         socket.write('ACK\r\n');
         log('info', 'tcp.packet.accepted', { deviceId, lat, lng });
 
@@ -165,8 +176,8 @@ function sendCommand(deviceId, action) {
   return true;
 }
 
-function startTcpServer() {
-  const server = createTcpServer();
+function startTcpServer(io) {
+  const server = createTcpServer(io);
   server.listen(TCP_PORT, '0.0.0.0', () => {
     log('info', 'tcp.server.start', { port: TCP_PORT });
   });

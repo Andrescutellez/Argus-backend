@@ -74,9 +74,23 @@ const obtenerDatos = async (req, res) => {
     const datos = await Gps.find({}).sort({ timestamp: -1 }).limit(100);
     return res.status(200).json(datos);
   } catch (error) {
-    console.error("Error al obtener datos GPS:", error.message);
-    return res.status(500).json({ message: "Error interno del servidor" });
+    console.error('Error al obtener datos GPS:', error.message);
+    return res.status(500).json({ message: 'Error interno del servidor' });
   }
 };
 
-module.exports = { guardarDato, obtenerDatos };
+const getLatestByDevice = async (req, res) => {
+  const { deviceId } = req.params;
+  try {
+    const record = await Gps.findOne({ deviceId }).sort({ timestamp: -1 });
+    if (!record) {
+      return res.status(404).json({ message: 'No hay datos para este dispositivo' });
+    }
+    return res.status(200).json(record);
+  } catch (error) {
+    console.error('Error al obtener GPS latest:', error.message);
+    return res.status(500).json({ message: 'Error interno del servidor' });
+  }
+};
+
+module.exports = { guardarDato, obtenerDatos, getLatestByDevice };
