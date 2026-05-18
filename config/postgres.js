@@ -1,0 +1,91 @@
+/**
+ * @fileoverview Pool de conexión a PostgreSQL y bootstrap del schema.
+ *
+ * PROPÓSITO:
+ *   Centraliza la conexión a PostgreSQL con pg.Pool (reutiliza conexiones TCP)
+ *   y crea las tablas si no existen al arrancar el servidor.
+ *
+ * VARIABLES CRÍTICAS:
+ *   DATABASE_URL: connection string de PostgreSQL. Formato:
+ *     postgresql://usuario:contraseña@host:5432/nombre_bd
+ *   Sin esta variable, initPostgres() llama process.exit(1).
+ *
+ * TABLAS CREADAS:
+ *   users         — cuenta de usuario con rol y contraseña hasheada
+ *   user_devices  — relación M:N entre usuarios y dispositivos ESP32
+ *
+ * @module config/postgres
+ */
+
+'use strict';
+
+const { Pool } = require('pg');
+
+let pool = null;
+
+/**
+ * @brief Inicializa el pool y crea el schema si no existe.
+ *
+ * FLUJO:
+ *   1. Crear Pool con DATABASE_URL (pg parsea el connection string automáticamente).
+ *   2. Probar la conexión con un SELECT 1.
+ *   3. Ejecutar DDL CREATE TABLE IF NOT EXISTS para users y user_devices.
+ *   4. Si falla en cualquier paso, loguear y hacer process.exit(1).
+ *
+ * @returns {Promise<void>}
+ */
+async function initPostgres() {
+  if (!process.env.DATABASE_URL) {
+    console.error('ERROR: DATABASE_URL no definida. Agrégala al .env');
+    process.exit(1);
+  }
+
+  pool = new Pool({ connectionString: process.env.DATABASE_URL });
+
+  try {
+    await pool.query('SELECT 1');
+    console.log('[PG] Conectado a PostgreSQL');
+  } catch (err) {
+    console.error('[PG] Error de conexión:', err.message);
+    process.exit(1);
+  }
+
+  // Crear extension pgcrypto para gen_random_uuid() — disponible en PostgreSQL 13+.
+  // En Railway, Supabase y Render ya viene habilitada por defecto.
+  await pool.query(`CREATE EXTENSION IF NOT EXISTS "pgcrypto"`);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      email         VARCHAR(255) UNIQUE NOT NULL,
+      password_hash VARCHAR(255) NOT NULL,
+      role          VARCHAR(20)  NOT NULL DEFAULT 'USER'
+                    CHECK (role IN ('USER', 'ADMIN', 'SUPER_ADMIN')),
+      created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  // user_devices vincula un usuario con los deviceIds ESP32 que le pertenecen.
+  // Un usuario puede tener múltiples dispositivos; un dispositivo pertenece a un usuario.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS user_devices (
+      user_id   UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      device_id VARCHAR(50) NOT NULL,
+      PRIMARY KEY (user_id, device_id)
+    )
+  `);
+
+  console.log('[PG] Schema listo (users, user_devices)');
+}
+
+/**
+ * @brief Retorna el pool activo para ejecutar queries.
+ *
+ * PROPÓSITO: Exponemos el pool como singleton para que los módulos de modelo
+ * (User.js) puedan hacer pool.query() sin reimportar pg.Pool.
+ *
+ * @returns {import('pg').Pool}
+ */
+const getPool = () => pool;
+
+module.exports = { initPostgres, getPool };

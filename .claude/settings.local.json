@@ -6,7 +6,27 @@
       "Bash(node --check config/db.js)",
       "Bash(node --check models/Gps.js)",
       "Bash(node --check routes/gps.js)",
-      "Bash(node --check controllers/gpsController.js)"
+      "Bash(node --check controllers/gpsController.js)",
+      "WebFetch(domain:oaiee.scj.gov.co)",
+      "Bash(node --check tcp/tcpServer.js)",
+      "Bash(node --check controllers/deviceController.js)",
+      "Bash(node --check controllers/alertController.js)",
+      "Bash(python -c ' *)",
+      "Bash(node --check \"c:/Users/Leonardo/Desktop/Proyecto Argus/Argus Backend/controllers/alertController.js\")",
+      "Bash(node --check \"c:/Users/Leonardo/Desktop/Proyecto Argus/Argus Backend/models/Alert.js\")",
+      "Bash(node --check \"c:/Users/Leonardo/Desktop/Proyecto Argus/Argus Backend/models/DeviceState.js\")",
+      "Bash(node --check \"c:/Users/Leonardo/Desktop/Proyecto Argus/Argus Backend/tcp/tcpServer.js\")",
+      "Bash(node --check \"c:/Users/Leonardo/Desktop/Proyecto Argus/Argus Backend/server.js\")",
+      "Bash(node --input-type=module)",
+      "Bash(node --check config/postgres.js)",
+      "Bash(node --check models/User.js)",
+      "Bash(node --check middleware/auth.js)",
+      "Bash(node --check controllers/authController.js)",
+      "Bash(node --check routes/auth.js)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\argus_app",
+      "c:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\Boveda Obsidian\\Argus\\_Claude"
     ]
   }
 }
