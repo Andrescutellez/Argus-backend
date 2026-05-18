@@ -13,6 +13,10 @@
  * TABLAS CREADAS:
  *   users         — cuenta de usuario con rol y contraseña hasheada
  *   user_devices  — relación M:N entre usuarios y dispositivos ESP32
+ *   motos         — motocicleta física asociada a un usuario
+ *   devices       — hardware ESP32 instalado en una moto
+ *   subscriptions — plan freemium/premium por usuario
+ *   audit_log     — registro inmutable de acciones críticas
  *
  * @module config/postgres
  */
@@ -75,7 +79,75 @@ async function initPostgres() {
     )
   `);
 
-  console.log('[PG] Schema listo (users, user_devices)');
+  /**
+   * motos — motocicleta física asociada a un usuario.
+   * Un usuario puede tener varias motos; una moto pertenece a un usuario.
+   */
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS motos (
+      id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id    UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      alias      VARCHAR(50),
+      placa      VARCHAR(20),
+      marca      VARCHAR(50),
+      modelo     VARCHAR(50),
+      color      VARCHAR(30),
+      anio       SMALLINT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  /**
+   * devices — hardware ESP32 instalado en una moto.
+   * device_id es el identificador que el ESP32 envía por TCP.
+   * moto_id es nullable para permitir dispositivos no asignados aún.
+   */
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS devices (
+      device_id        VARCHAR(50) PRIMARY KEY,
+      moto_id          UUID        REFERENCES motos(id) ON DELETE SET NULL,
+      imei             VARCHAR(20),
+      firmware_version VARCHAR(20),
+      created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  /**
+   * subscriptions — plan activo por usuario.
+   * Un usuario tiene una suscripción activa a la vez.
+   * Las expiradas quedan como historial (status = 'EXPIRED').
+   */
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS subscriptions (
+      id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id    UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      plan       VARCHAR(10) NOT NULL DEFAULT 'FREEMIUM'
+                 CHECK (plan IN ('FREEMIUM', 'PREMIUM')),
+      status     VARCHAR(10) NOT NULL DEFAULT 'ACTIVE'
+                 CHECK (status IN ('ACTIVE', 'EXPIRED', 'CANCELLED')),
+      starts_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      expires_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  /**
+   * audit_log — registro append-only de acciones críticas.
+   * Nunca se actualiza ni borra. metadata guarda contexto extra en JSON.
+   */
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id     UUID        REFERENCES users(id) ON DELETE SET NULL,
+      action      VARCHAR(50) NOT NULL,
+      target_type VARCHAR(30),
+      target_id   VARCHAR(50),
+      metadata    JSONB,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  console.log('[PG] Schema listo (users, user_devices, motos, devices, subscriptions, audit_log)');
 }
 
 /**
