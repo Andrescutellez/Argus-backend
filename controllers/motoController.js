@@ -17,6 +17,7 @@
 
 const Moto   = require('../models/Moto');
 const Device = require('../models/Device');
+const User   = require('../models/User');
 const { log } = require('../models/AuditLog');
 
 /**
@@ -167,6 +168,9 @@ const assignDevice = async (req, res) => {
     // Crear el device si no existe aún en la tabla devices
     await Device.createDevice({ deviceId });
     const device = await Device.assignToMoto(deviceId, moto.id);
+
+    // Vincular el device al usuario para que canAccessDevice y el JWT funcionen
+    await User.addDevice(req.user.sub, deviceId);
 
     await log({
       userId: req.user.sub,
