@@ -11,8 +11,9 @@
  *   2. Verificar que el email no esté registrado.
  *   3. Hashear la contraseña con bcrypt (cost 12).
  *   4. Crear el usuario en PostgreSQL.
- *   5. Si se pasa deviceId, asociarlo al usuario.
- *   6. Emitir JWT con payload { sub, email, role, deviceIds }.
+ *   5. Crear suscripción FREEMIUM por defecto.
+ *   6. Si se pasa deviceId, asociarlo al usuario.
+ *   7. Emitir JWT con payload { sub, email, role, deviceIds }.
  *
  * FLUJO DE LOGIN:
  *   1. Buscar usuario por email.
@@ -31,9 +32,10 @@
 
 'use strict';
 
-const bcrypt = require('bcryptjs');
-const jwt    = require('jsonwebtoken');
-const User   = require('../models/User');
+const bcrypt       = require('bcryptjs');
+const jwt          = require('jsonwebtoken');
+const User         = require('../models/User');
+const Subscription = require('../models/Subscription');
 
 const BCRYPT_ROUNDS = 12;
 const SECRET        = process.env.JWT_SECRET;
@@ -71,8 +73,9 @@ function signToken(user, deviceIds) {
  *   2. Verificar unicidad del email (409 si ya existe).
  *   3. Hashear password con bcrypt.
  *   4. Crear usuario en PostgreSQL.
- *   5. Si viene deviceId en el body, asociarlo.
- *   6. Emitir JWT y retornar 201.
+ *   5. Crear suscripción FREEMIUM por defecto.
+ *   6. Si viene deviceId en el body, asociarlo.
+ *   7. Emitir JWT y retornar 201.
  *
  * @param {import('express').Request}  req
  *   Body: { email, password, deviceId?, role? }
@@ -100,6 +103,9 @@ const register = async (req, res) => {
   try {
     const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
     const user = await User.createUser({ email, passwordHash });
+
+    // Todo usuario nuevo arranca en FREEMIUM
+    await Subscription.createSubscription(user.id);
 
     // Asociar dispositivo si se proporcionó en el registro
     if (deviceId) await User.addDevice(user.id, deviceId);

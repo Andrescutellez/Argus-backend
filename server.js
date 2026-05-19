@@ -44,7 +44,9 @@ const { initPostgres } = require('./config/postgres'); // Pool y schema PostgreS
 const gpsRoutes = require('./routes/gps');             // Rutas REST para datos GPS
 const deviceRoutes = require('./routes/device');       // Rutas REST para gestión de dispositivos
 const alertRoutes = require('./routes/alert');         // Rutas REST para historial de alertas
-const authRoutes = require('./routes/auth');            // Rutas REST de autenticación JWT
+const authRoutes  = require('./routes/auth');            // Rutas REST de autenticación JWT
+const motoRoutes  = require('./routes/moto');            // Rutas REST para motos
+const auditRoutes = require('./routes/audit');           // Rutas REST para audit log
 const { startTcpServer } = require('./tcp/tcpServer'); // Servidor TCP para ESP32
 const { startWorker } = require('./tcp/queue');        // Worker que escribe batches a MongoDB
 
@@ -151,6 +153,8 @@ app.use('/api/auth',   authRoutes);
 app.use('/api/gps',    gpsRoutes);
 app.use('/api/device', deviceRoutes);
 app.use('/api/alerts', alertRoutes);
+app.use('/api/motos',  motoRoutes);
+app.use('/api/audit',  auditRoutes);
 
 // ─── 11. MANEJADOR 404 CATCH-ALL ──────────────────────────────────────────────
 // En Express 5 los middlewares de error deben registrarse después de todas
