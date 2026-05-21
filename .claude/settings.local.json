@@ -26,7 +26,8 @@
       "Bash(grep -r \"34\\\\.71\\\\.79\\\\.227\" \"c:\\\\Users\\\\Leonardo\\\\Desktop\\\\Proyecto Argus\" --include=\"*.js\" --include=\"*.ts\" --include=\"*.dart\" --include=\"*.json\" --include=\"*.env*\" --include=\"*.md\" -l 2>/dev/null)",
       "Read(//c/Users/Leonardo/Desktop/Proyecto Argus/**)",
       "Bash(ls \"c:\\\\Users\\\\Leonardo\\\\Desktop\\\\Proyecto Argus\\\\\")",
-      "Read(//c/Users/Leonardo/Desktop/**)"
+      "Read(//c/Users/Leonardo/Desktop/**)",
+      "Bash(node --check tcp/deviceAuth.js tcp/tcpServer.js controllers/motoController.js controllers/manufacturedDeviceController.js routes/manufactured.js models/ManufacturedDevice.js)"
     ],
     "additionalDirectories": [
       "c:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\argus_app",
@@ -35,7 +36,10 @@
       "c:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\argus-web-usuario\\src\\store",
       "c:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\argus-web-usuario\\src\\pages",
       "c:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\argus-web-usuario\\src\\components\\layout",
-      "c:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\argus-web-usuario\\src"
+      "c:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\argus-web-usuario\\src",
+      "C:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\argus-web-operador\\src\\store",
+      "C:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\argus-web-operador\\src\\api",
+      "C:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\argus-web-operador\\src\\pages"
     ]
   }
 }

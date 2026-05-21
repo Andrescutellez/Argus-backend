@@ -15,10 +15,11 @@
 
 'use strict';
 
-const Moto   = require('../models/Moto');
-const Device = require('../models/Device');
-const User   = require('../models/User');
-const { log } = require('../models/AuditLog');
+const Moto               = require('../models/Moto');
+const Device             = require('../models/Device');
+const User               = require('../models/User');
+const ManufacturedDevice = require('../models/ManufacturedDevice');
+const { log }            = require('../models/AuditLog');
 
 /**
  * @brief Crea una nueva moto para el usuario autenticado.
@@ -163,6 +164,25 @@ const assignDevice = async (req, res) => {
 
     if (req.user.role === 'USER' && moto.user_id !== req.user.sub) {
       return res.status(403).json({ message: 'Acceso denegado' });
+    }
+
+    // Bloquear si el device no está en el catálogo de fabricación.
+    // Esto impide que usuarios registren MACs inventadas o dispositivos clonados.
+    const manufactured = await ManufacturedDevice.isManufactured(deviceId);
+    if (!manufactured) {
+      return res.status(403).json({ message: 'El dispositivo no está autorizado por el fabricante' });
+    }
+
+    // Bloquear si el device ya pertenece a OTRO usuario
+    const currentOwner = await User.getDeviceOwner(deviceId);
+    if (currentOwner && currentOwner !== req.user.sub) {
+      return res.status(409).json({ message: 'El dispositivo ya está registrado por otro usuario' });
+    }
+
+    // Bloquear si el device ya está instalado en UNA MOTO DISTINTA del mismo usuario
+    const existingDevice = await Device.getDeviceById(deviceId);
+    if (existingDevice?.moto_id && existingDevice.moto_id !== moto.id) {
+      return res.status(409).json({ message: 'El dispositivo ya está instalado en otra moto. Desinstálalo primero.' });
     }
 
     // Crear el device si no existe aún en la tabla devices

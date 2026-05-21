@@ -147,7 +147,22 @@ async function initPostgres() {
     )
   `);
 
-  console.log('[PG] Schema listo (users, user_devices, motos, devices, subscriptions, audit_log)');
+  /**
+   * manufactured_devices — catálogo de MACs autorizadas (pre-registradas de fábrica).
+   * Solo los deviceIds presentes aquí pueden conectarse al servidor TCP y ser
+   * asignados por usuarios. Esto previene que dispositivos clonados o desconocidos
+   * entren al sistema. Gestionado exclusivamente por SUPER_ADMIN vía REST.
+   */
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS manufactured_devices (
+      device_id     VARCHAR(50) PRIMARY KEY,
+      imei          VARCHAR(20),
+      registered_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      notes         TEXT
+    )
+  `);
+
+  console.log('[PG] Schema listo (users, user_devices, motos, devices, subscriptions, audit_log, manufactured_devices)');
 }
 
 /**

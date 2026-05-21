@@ -90,4 +90,65 @@ async function getDevices(userId) {
   return rows.map((r) => r.device_id);
 }
 
-module.exports = { findByEmail, findById, createUser, addDevice, getDevices };
+/**
+ * @brief Retorna el userId dueño de un deviceId, o null si no está registrado.
+ * @param {string} deviceId
+ * @returns {Promise<string|null>} UUID del usuario o null.
+ */
+async function getDeviceOwner(deviceId) {
+  const { rows } = await getPool().query(
+    'SELECT user_id FROM user_devices WHERE device_id = $1 LIMIT 1',
+    [deviceId],
+  );
+  return rows[0]?.user_id ?? null;
+}
+
+/**
+ * @brief Retorna todos los usuarios con sus motos y dispositivos asignados.
+ *        Usado por el endpoint /api/fleet del web operador.
+ * @returns {Promise<Array<{ userId, email, plan, motos }>>}
+ */
+async function getAllUsersWithDevices() {
+  const { rows } = await getPool().query(`
+    SELECT
+      u.id          AS user_id,
+      u.email,
+      COALESCE(s.plan, 'FREEMIUM') AS plan,
+      m.id          AS moto_id,
+      m.alias,
+      m.placa,
+      m.marca,
+      m.modelo,
+      m.color,
+      m.anio,
+      d.device_id
+    FROM users u
+    LEFT JOIN subscriptions s
+           ON s.user_id = u.id AND s.status = 'ACTIVE'
+    LEFT JOIN motos m ON m.user_id = u.id
+    LEFT JOIN devices d ON d.moto_id = m.id
+    ORDER BY u.email, m.created_at NULLS LAST
+  `);
+
+  const map = new Map();
+  for (const row of rows) {
+    if (!map.has(row.user_id)) {
+      map.set(row.user_id, { userId: row.user_id, email: row.email, plan: row.plan, motos: [] });
+    }
+    if (row.moto_id) {
+      map.get(row.user_id).motos.push({
+        id: row.moto_id,
+        alias: row.alias,
+        placa: row.placa,
+        marca: row.marca,
+        modelo: row.modelo,
+        color: row.color,
+        anio: row.anio,
+        deviceId: row.device_id ?? null,
+      });
+    }
+  }
+  return Array.from(map.values());
+}
+
+module.exports = { findByEmail, findById, createUser, addDevice, getDevices, getDeviceOwner, getAllUsersWithDevices };

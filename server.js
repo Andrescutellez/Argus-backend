@@ -47,6 +47,9 @@ const alertRoutes = require('./routes/alert');         // Rutas REST para histor
 const authRoutes  = require('./routes/auth');            // Rutas REST de autenticación JWT
 const motoRoutes  = require('./routes/moto');            // Rutas REST para motos
 const auditRoutes = require('./routes/audit');           // Rutas REST para audit log
+const subscriptionRoutes      = require('./routes/subscription');  // Rutas REST para suscripciones
+const fleetRoutes             = require('./routes/fleet');          // Rutas REST para flota (operador)
+const manufacturedRoutes      = require('./routes/manufactured');   // Rutas REST para catálogo de MACs
 const { startTcpServer } = require('./tcp/tcpServer'); // Servidor TCP para ESP32
 const { startWorker } = require('./tcp/queue');        // Worker que escribe batches a MongoDB
 
@@ -153,8 +156,11 @@ app.use('/api/auth',   authRoutes);
 app.use('/api/gps',    gpsRoutes);
 app.use('/api/device', deviceRoutes);
 app.use('/api/alerts', alertRoutes);
-app.use('/api/motos',  motoRoutes);
-app.use('/api/audit',  auditRoutes);
+app.use('/api/motos',         motoRoutes);
+app.use('/api/audit',         auditRoutes);
+app.use('/api/subscriptions', subscriptionRoutes);
+app.use('/api/fleet',         fleetRoutes);
+app.use('/api/manufactured',  manufacturedRoutes);
 
 // ─── 11. MANEJADOR 404 CATCH-ALL ──────────────────────────────────────────────
 // En Express 5 los middlewares de error deben registrarse después de todas

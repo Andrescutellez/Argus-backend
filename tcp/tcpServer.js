@@ -447,7 +447,7 @@ function createTcpServer(io) {
     const MAX_FAILED_AUTH = 3;
 
     // ── EVENTO: datos entrantes ──────────────────────────────────────────────
-    socket.on('data', (chunk) => {
+    socket.on('data', async (chunk) => {
       // Log de bytes crudos para diagnóstico de protocolo.
       // El hex permite ver caracteres no imprimibles (\r, \0, etc.) que podrían
       // confundir el parser. En producción esto puede ser muy verboso;
@@ -501,7 +501,7 @@ function createTcpServer(io) {
           }
 
           // Mismas validaciones de auth que para frames GPS.
-          if (!isAllowed(event.deviceId)) {
+          if (!(await isAllowed(event.deviceId))) {
             log('warn', 'tcp.auth.unknown_device', { deviceId: event.deviceId, remote });
             failedAuthAttempts += 1;
             socket.write('ERR\r\n');
@@ -579,7 +579,7 @@ function createTcpServer(io) {
         // Verificar que el deviceId esté en la lista de devices autorizados
         // ANTES de verificar la firma. Esto evita que un atacante con un
         // deviceId inventado consuma CPU calculando CRC32.
-        if (!isAllowed(packet.deviceId)) {
+        if (!(await isAllowed(packet.deviceId))) {
           log('warn', 'tcp.auth.unknown_device', { deviceId: packet.deviceId, remote });
           failedAuthAttempts += 1;
           socket.write('ERR\r\n');

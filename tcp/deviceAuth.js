@@ -21,6 +21,8 @@
 
 'use strict';
 
+const ManufacturedDevice = require('../models/ManufacturedDevice');
+
 // ─── CONFIGURACIÓN ────────────────────────────────────────────────────────────
 
 /**
@@ -42,33 +44,6 @@
  *   usa el secreto público 'argus-dev-secret' sin dar ningún error.
  */
 const SECRET = process.env.TCP_SECRET || 'argus-dev-secret';
-
-/**
- * Conjunto (Set) de deviceIds autorizados para conectarse al servidor TCP.
- *
- * Se lee de la variable de entorno ALLOWED_DEVICES como una lista separada
- * por comas: "ESP32-001,ESP32-002,ESP32-003".
- *
- * El uso de Set en lugar de Array reduce la complejidad de la búsqueda de
- * O(n) a O(1) amortizado. Con pocos dispositivos la diferencia es despreciable,
- * pero es la estructura correcta para una whitelist.
- *
- * @type {Set<string>}
- *
- * ARQUITECTURA ⚠️: whitelist estática en variable de entorno
- *   CÓMO LO HARÍA UN SENIOR: cargar la whitelist desde MongoDB al arrancar
- *   y actualizar el Set periódicamente (o vía evento) cuando se registra
- *   un nuevo dispositivo en la plataforma. Actualmente añadir un device
- *   requiere reiniciar el servidor.
- *   IMPACTO ACTUAL: escala mal cuando el negocio crece; cada nuevo cliente
- *   requiere cambiar .env y reiniciar el proceso en GCP.
- */
-const ALLOWED_DEVICES = new Set(
-  (process.env.ALLOWED_DEVICES || 'ESP32-001,ESP32-002')
-    .split(',')
-    .map((d) => d.trim())   // Eliminar espacios accidentales: "ESP32-001 , ESP32-002"
-    .filter(Boolean)        // Eliminar strings vacíos por comas dobles: "ESP32-001,,ESP32-002"
-);
 
 // ─── IMPLEMENTACIÓN DE CRC32 ──────────────────────────────────────────────────
 
@@ -153,33 +128,27 @@ function crc32Argus(text) {
 // ─── FUNCIONES EXPORTADAS ─────────────────────────────────────────────────────
 
 /**
- * @brief Verifica si un deviceId está en la whitelist de dispositivos autorizados.
+ * @brief Verifica si un deviceId está en el catálogo de devices manufacturados.
  *
  * PROPÓSITO:
  *   Primera línea de defensa antes de gastar CPU en el cálculo de CRC32.
- *   Un deviceId que no esté registrado no debería poder enviar datos,
- *   independientemente de si tiene la firma correcta.
+ *   Solo los devices pre-registrados en la tabla manufactured_devices (por un
+ *   SUPER_ADMIN) pueden enviar datos al servidor TCP.
  *
  * FLUJO LÓGICO:
- *   1. Buscar el deviceId en el Set ALLOWED_DEVICES.
- *   2. Set.has() es O(1) amortizado — no recorre todos los elementos.
- *   3. Retornar el booleano directamente.
+ *   1. Consultar manufactured_devices en PostgreSQL con SELECT LIMIT 1.
+ *   2. Retornar true si existe una fila, false en caso contrario.
+ *   3. Si la BD no está disponible, el error se propaga y el frame se rechaza
+ *      (fallo seguro: ante duda, rechazar).
  *
  * DEPENDENCIAS:
- *   - ALLOWED_DEVICES: Set<string> inicializado al cargar el módulo.
- *
- * POSIBLES MEJORAS (senior):
- *   - Soportar recarga dinámica de la whitelist sin reiniciar el servidor:
- *     exponer una función reloadAllowedDevices() que vacíe y recargue el Set.
- *   - Cargar los devices desde MongoDB en lugar de variables de entorno.
+ *   - ManufacturedDevice: modelo que encapsula la query a PostgreSQL.
  *
  * @param {string} deviceId — El identificador del dispositivo a verificar.
- * @returns {boolean} — true si el device está autorizado; false si debe ser rechazado.
+ * @returns {Promise<boolean>} — true si el device está autorizado.
  */
-function isAllowed(deviceId) {
-  // Set.has() es la operación de búsqueda en un conjunto.
-  // Equivale a un lookup en una tabla hash: O(1) sin importar cuántos devices haya.
-  return ALLOWED_DEVICES.has(deviceId);
+async function isAllowed(deviceId) {
+  return ManufacturedDevice.isManufactured(deviceId);
 }
 
 /**
@@ -252,6 +221,7 @@ function verifySignature(deviceId, timestamp, lat, lng, signature) {
 }
 
 // ─── EXPORTACIONES ────────────────────────────────────────────────────────────
+// isAllowed es ahora async (consulta PostgreSQL). El caller debe usar await.
 module.exports = { isAllowed, verifySignature };
 
 
@@ -269,9 +239,9 @@ module.exports = { isAllowed, verifySignature };
    sobre se descarta.
 
    PSEUDOCÓDIGO:
-   isAllowed(deviceId):
-     → buscar deviceId en ALLOWED_DEVICES (Set)
-     → retornar true/false
+   isAllowed(deviceId):  [ASYNC]
+     → SELECT 1 FROM manufactured_devices WHERE device_id = ?
+     → retornar rows.length > 0
 
    verifySignature(deviceId, timestamp, lat, lng, signature):
      → si lat o lng no son números finitos → return false
@@ -296,7 +266,7 @@ module.exports = { isAllowed, verifySignature };
 
    VARIABLES CRÍTICAS:
    - SECRET: si se filtra, cualquiera puede forjar paquetes válidos para cualquier device registrado
-   - ALLOWED_DEVICES: si se corrompe (vacía), ningún device podría enviar datos
+   - manufactured_devices (PostgreSQL): si la tabla está vacía, ningún device puede enviar datos
 
    RIESGOS DE SEGURIDAD:
    - CRC32 no es criptográficamente seguro: susceptible a ataques de colisión premeditados
