@@ -202,7 +202,13 @@ const me = async (req, res) => {
 
     const deviceIds = await User.getDevices(user.id);
 
+    // Emitir token fresco con deviceIds actualizados. Necesario porque el token
+    // original puede haberse emitido antes de asignar el dispositivo al usuario,
+    // y canAccessDevice valida contra el payload del JWT (no la BD).
+    const token = signToken(user, deviceIds);
+
     return res.status(200).json({
+      token,
       id: user.id,
       email: user.email,
       role: user.role,
