@@ -28,7 +28,25 @@
       "Bash(ls \"c:\\\\Users\\\\Leonardo\\\\Desktop\\\\Proyecto Argus\\\\\")",
       "Read(//c/Users/Leonardo/Desktop/**)",
       "Bash(node --check tcp/deviceAuth.js tcp/tcpServer.js controllers/motoController.js controllers/manufacturedDeviceController.js routes/manufactured.js models/ManufacturedDevice.js)",
-      "Bash(dir \"C:\\\\Users\\\\Leonardo\\\\Desktop\\\\Proyecto Argus\\\\oaiee API\" /b)"
+      "Bash(dir \"C:\\\\Users\\\\Leonardo\\\\Desktop\\\\Proyecto Argus\\\\oaiee API\" /b)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\Leonardo\\\\Desktop\\\\Portafolio\" -Recurse -Depth 3)",
+      "Bash(Select-Object FullName, PSIsContainer)",
+      "Bash(Format-Table -AutoSize)",
+      "Bash(ls -la \"/mnt/c/Users/Leonardo/Desktop/Portafolio/\" 2>/dev/null || echo \"No montado en WSL\")",
+      "Read(//mnt/c/Users/Leonardo/Desktop/**)",
+      "Bash(gh repo *)",
+      "WebSearch",
+      "Bash(mkdir \"C:\\\\Users\\\\Leonardo\\\\Desktop\\\\Proyecto Argus\\\\argus-landing\")",
+      "Bash(start \"\" \"C:\\\\Users\\\\Leonardo\\\\Desktop\\\\Proyecto Argus\\\\argus-landing\\\\index.html\")",
+      "Bash(ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no andrescutellez@34.69.219.193 \"echo 'SSH OK' && whoami && uname -a\")",
+      "Bash(gcloud --version)",
+      "Read(//c/Users/Leonardo/.ssh/**)",
+      "Bash(ssh -i ~/.ssh/argus_gcp -o ConnectTimeout=15 -o StrictHostKeyChecking=no andrescutellez@34.69.219.193 \"echo 'SSH OK' && whoami && hostname\")",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)"
     ],
     "additionalDirectories": [
       "c:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\argus_app",
@@ -42,7 +60,10 @@
       "C:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\argus-web-operador\\src\\api",
       "C:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\argus-web-operador\\src\\pages",
       "C:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\argus-web-operador\\src\\components\\layout",
-      "C:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\argus-web-operador\\src"
+      "C:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\argus-web-operador\\src",
+      "C:\\Users\\Leonardo\\Desktop\\Portafolio\\assets",
+      "C:\\Users\\Leonardo\\Desktop\\Portafolio",
+      "C:\\Users\\Leonardo\\Desktop\\Proyecto Argus"
     ]
   }
 }
