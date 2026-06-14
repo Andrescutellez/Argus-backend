@@ -44,10 +44,11 @@ const LOCALIDADES = {
 
 // ─── Carga de datos en memoria ────────────────────────────────────────────────
 
-let CUADRANTES = null;  // GeoJSON FeatureCollection
-let CAI        = null;  // array de puntos
-let ESTACIONES = null;  // array de puntos
-let GIS_READY  = false;
+let CUADRANTES          = null;  // GeoJSON FeatureCollection
+let CAI                 = null;  // array de puntos
+let ESTACIONES          = null;  // array de puntos
+let CUADRANTE_CENTROIDS = null;  // [{ cx, cy, feature }] — precalculados al arrancar
+let GIS_READY           = false;
 
 function loadGisData() {
   try {
@@ -68,6 +69,15 @@ function loadGisData() {
     // Enriquecer con loc_nombre una sola vez al cargar — evita join en cada request
     CUADRANTES.features.forEach(f => {
       f.properties.loc_nombre = LOCALIDADES[f.properties.loc_codigo] ?? null;
+    });
+
+    // Precalcular centroide aproximado de cada cuadrante para cuadrantesNear
+    CUADRANTE_CENTROIDS = CUADRANTES.features.map(f => {
+      let sumX = 0, sumY = 0, count = 0;
+      const addRing = ring => { for (const [x, y] of ring) { sumX += x; sumY += y; count++; } };
+      if (f.geometry.type === 'Polygon')      addRing(f.geometry.coordinates[0]);
+      if (f.geometry.type === 'MultiPolygon') f.geometry.coordinates.forEach(p => addRing(p[0]));
+      return { cx: sumX / count, cy: sumY / count, feature: f };
     });
 
     GIS_READY  = true;
@@ -259,7 +269,33 @@ async function cuadrantes(req, res) {
   res.json(CUADRANTES);
 }
 
-module.exports = { lookup, near, heatmap, cuadrantes };
+/**
+ * GET /api/gis/cuadrantes-near?lon=&lat=&limit=5
+ *
+ * Devuelve los N cuadrantes más cercanos al punto GPS (por centroide precalculado).
+ * Usado por web-usuario y Flutter para mostrar solo el área local de la moto.
+ *
+ * Incluye el cuadrante contenedor + vecinos inmediatos en ~1ms (O(599), solo aritmética).
+ */
+async function cuadrantesNear(req, res) {
+  if (!GIS_READY) return notReady(res);
+
+  const coords = parseLonLat(req);
+  if (!coords) return res.status(400).json({ message: 'lon y lat requeridos' });
+
+  const { lon, lat } = coords;
+  const limit = Math.min(parseInt(req.query.limit) || 5, 10);
+
+  const nearest = CUADRANTE_CENTROIDS
+    .map(({ cx, cy, feature }) => ({ feature, dist: haversineM(lat, lon, cy, cx) }))
+    .sort((a, b) => a.dist - b.dist)
+    .slice(0, limit)
+    .map(x => x.feature);
+
+  res.json({ type: 'FeatureCollection', features: nearest });
+}
+
+module.exports = { lookup, near, heatmap, cuadrantes, cuadrantesNear };
 
 /* ═══════════════════════════════════════════════════════════
    RESUMEN DEL MÓDULO — gisController.js
