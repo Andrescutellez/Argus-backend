@@ -64,6 +64,12 @@ function loadGisData() {
     CUADRANTES = JSON.parse(fs.readFileSync(cuadFile, 'utf8'));
     CAI        = JSON.parse(fs.readFileSync(caiFile,  'utf8'));
     ESTACIONES = JSON.parse(fs.readFileSync(estFile,  'utf8'));
+
+    // Enriquecer con loc_nombre una sola vez al cargar — evita join en cada request
+    CUADRANTES.features.forEach(f => {
+      f.properties.loc_nombre = LOCALIDADES[f.properties.loc_codigo] ?? null;
+    });
+
     GIS_READY  = true;
 
     console.log(`[GIS] Datos cargados: ${CUADRANTES.features.length} cuadrantes, ${CAI.length} CAI, ${ESTACIONES.length} estaciones`);
@@ -237,7 +243,23 @@ async function heatmap(req, res) {
   res.json({ ok: true, localidades: Object.values(byLoc).sort((a, b) => a.loc_codigo.localeCompare(b.loc_codigo)) });
 }
 
-module.exports = { lookup, near, heatmap };
+/**
+ * GET /api/gis/cuadrantes
+ *
+ * Devuelve el GeoJSON FeatureCollection completo de los 599 cuadrantes policiales,
+ * enriquecido con loc_nombre. Usado por web-operador para el overlay territorial.
+ *
+ * ~2.3 MB de payload — se carga una sola vez por sesión del operador.
+ * El GeoJSON ya está en memoria desde loadGisData(), no hay I/O adicional.
+ */
+async function cuadrantes(req, res) {
+  if (!GIS_READY) return notReady(res);
+  // Cache de 1 hora en proxy/CDN — el territorio cambia raramente
+  res.set('Cache-Control', 'private, max-age=3600');
+  res.json(CUADRANTES);
+}
+
+module.exports = { lookup, near, heatmap, cuadrantes };
 
 /* ═══════════════════════════════════════════════════════════
    RESUMEN DEL MÓDULO — gisController.js
