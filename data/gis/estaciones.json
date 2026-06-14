@@ -1,0 +1,191 @@
+[
+  {
+    "id": 2277,
+    "nombre": "Estación de Policía Antonio Nariño",
+    "direccion": "KR 24 18 90 SUR",
+    "lat": 4.58560804,
+    "lon": -74.10313454,
+    "telefono": "3502150333",
+    "loc_codigo": "15"
+  },
+  {
+    "id": 2278,
+    "nombre": "Estación de Policía Barrios Unidos",
+    "direccion": "AVENIDA CHILE 62 81",
+    "lat": 4.673812,
+    "lon": -74.08186178,
+    "telefono": "3002326359",
+    "loc_codigo": "12"
+  },
+  {
+    "id": 2279,
+    "nombre": "Estación de Policía Bosa ",
+    "direccion": "CL 65 SUR 77N 23",
+    "lat": 4.60015661,
+    "lon": -74.18678725,
+    "telefono": "3502150329",
+    "loc_codigo": "07"
+  },
+  {
+    "id": 2280,
+    "nombre": "Estación de Policía Ciudad Bolívar",
+    "direccion": "DG 70 SUR 54 22",
+    "lat": 4.57747818,
+    "lon": -74.16465861,
+    "telefono": "3203016935",
+    "loc_codigo": "19"
+  },
+  {
+    "id": 2281,
+    "nombre": "Estación de Policía Engativá",
+    "direccion": "KR 78A 70 54",
+    "lat": 4.690011,
+    "lon": -74.102676,
+    "telefono": "3502150296",
+    "loc_codigo": "10"
+  },
+  {
+    "id": 2282,
+    "nombre": "Estación de Policía Fontibón",
+    "direccion": "KR 98 16B 50",
+    "lat": 4.66768848,
+    "lon": -74.14872513,
+    "telefono": "3203121620",
+    "loc_codigo": "09"
+  },
+  {
+    "id": 2283,
+    "nombre": "Estación de Policía Kennedy",
+    "direccion": "CL 41D SUR 78N 05",
+    "lat": 4.61955324,
+    "lon": -74.15957198,
+    "telefono": "3503150315",
+    "loc_codigo": "08"
+  },
+  {
+    "id": 2284,
+    "nombre": "Estación de Policía Los Mártires",
+    "direccion": "KR 24 12 32",
+    "lat": 4.60892794,
+    "lon": -74.0886263,
+    "telefono": "3103469776",
+    "loc_codigo": "14"
+  },
+  {
+    "id": 2285,
+    "nombre": "Estación de Policía Puente Aranda",
+    "direccion": "KR 39 10 25",
+    "lat": 4.6175540999999996,
+    "lon": -74.10275902,
+    "telefono": "3203078648",
+    "loc_codigo": "16"
+  },
+  {
+    "id": 2286,
+    "nombre": "Estación de Policía Suba",
+    "direccion": "KR 92 146C 49",
+    "lat": 4.74141384,
+    "lon": -74.08531129,
+    "telefono": "314357195",
+    "loc_codigo": "11"
+  },
+  {
+    "id": 2287,
+    "nombre": "Estación de Policía Teusaquillo",
+    "direccion": "KR 13 40A 26",
+    "lat": 4.62750088,
+    "lon": -74.06664366,
+    "telefono": "3203051839",
+    "loc_codigo": "02"
+  },
+  {
+    "id": 2288,
+    "nombre": "Estación de Policía Tunjuelito",
+    "direccion": "AK JORGE GAITAN CORTES 48C 09 SUR",
+    "lat": 4.5860512700000005,
+    "lon": -74.13331834,
+    "telefono": "3203074859",
+    "loc_codigo": "06"
+  },
+  {
+    "id": 2289,
+    "nombre": "Estación de Policía Usaquén",
+    "direccion": "CL 165 8A 43",
+    "lat": 4.74153736,
+    "lon": -74.02673203,
+    "telefono": "3203026487",
+    "loc_codigo": "01"
+  },
+  {
+    "id": 2290,
+    "nombre": "Estación de Policía Usme",
+    "direccion": "KR 14 99 55 SUR",
+    "lat": 4.50100778,
+    "lon": -74.11774572,
+    "telefono": "3203027759",
+    "loc_codigo": "05"
+  },
+  {
+    "id": 2291,
+    "nombre": "Estación de Policía La Candelaría",
+    "direccion": "KR 7 6A 12",
+    "lat": 4.59141875,
+    "lon": -74.07891564,
+    "telefono": "3203088721",
+    "loc_codigo": "17"
+  },
+  {
+    "id": 2292,
+    "nombre": "Estación de Policía Chapinero",
+    "direccion": "KR 2 56 40",
+    "lat": 4.6416127,
+    "lon": -74.05839031,
+    "telefono": "3143550776",
+    "loc_codigo": "02"
+  },
+  {
+    "id": 2293,
+    "nombre": "Estación de Policía San Cristóbal",
+    "direccion": "AV 1 DE MAYO 1 90 ESTE",
+    "lat": 4.57002709,
+    "lon": -74.08586752,
+    "telefono": "3502150328",
+    "loc_codigo": "04"
+  },
+  {
+    "id": 2294,
+    "nombre": "Estación de Policía Rafael Uribe Uribe",
+    "direccion": "CL 27 SUR 24H 39",
+    "lat": 4.5853832,
+    "lon": -74.11055633,
+    "telefono": "3203024427",
+    "loc_codigo": "18"
+  },
+  {
+    "id": 2295,
+    "nombre": "Estación de Policía Aeropuerto",
+    "direccion": "AV EL DORADO 103 09",
+    "lat": 4.69493158,
+    "lon": -74.14177615,
+    "telefono": "4397070",
+    "loc_codigo": "09"
+  },
+  {
+    "id": 2296,
+    "nombre": "Estación de Policía Terminal",
+    "direccion": "DG 22A 68D 90 MODULO 5 LOCAL 101",
+    "lat": 4.65113063,
+    "lon": -74.11454031,
+    "telefono": "4233630",
+    "loc_codigo": "09"
+  },
+  {
+    "id": 2297,
+    "nombre": "Estación de Policía Santa Fe",
+    "direccion": "KR 5 29 40",
+    "lat": 4.615283,
+    "lon": -74.066364,
+    "telefono": "3203021449",
+    "loc_codigo": "03"
+  }
+]
