@@ -1,40 +1,136 @@
 /**
- * @fileoverview Controlador de consultas GIS sobre PostGIS.
+ * @fileoverview Controlador GIS — lookup en memoria sin PostgreSQL/PostGIS.
  *
  * PROPÓSITO:
- *   Expone tres endpoints que permiten a los frontends enriquecer
- *   cualquier coordenada GPS con contexto geoespacial de Bogotá:
- *   jerarquía territorial, cuadrante policial y POIs cercanos.
+ *   Resuelve consultas geoespaciales cargando los datos de OAIEE como archivos
+ *   JSON estáticos en memoria al arrancar el servidor. No requiere PostgreSQL GIS
+ *   ni el gis-sync-service. Los archivos se generan una vez con:
+ *     node gis-sync-service/scripts/fetchGisStatic.js
  *
- * ARQUITECTURA:
- *   Consulta directamente la BD PostgreSQL/PostGIS mediante el pool
- *   existente en config/postgres.js. Sin capa intermedia de caché
- *   por ahora — los índices GIST de PostGIS garantizan <10ms por query.
+ * ARCHIVOS DE DATOS:
+ *   data/gis/cuadrantes.geojson  — 599 polígonos (Polygon/MultiPolygon WGS84)
+ *   data/gis/cai.json            — 154 puntos CAI
+ *   data/gis/estaciones.json     — 21 estaciones de policía
  *
- * TABLAS USADAS:
- *   - entornos (59 384 polígonos): tabla maestra de lookup territorial.
- *   - cuadrantes (599): polígonos de cuadrante policial con teléfono patrullero.
- *   - cai (154): puntos de Centros de Atención Inmediata.
- *   - estaciones_policia (21): una por localidad, con teléfono.
- *   - localidades (21) + delitos_hurto_motos (21): para heatmap de riesgo.
+ * ALGORITMOS:
+ *   lookup → ray casting point-in-polygon sobre 599 cuadrantes (~<2ms).
+ *   near   → distancia haversine sobre arrays pequeños (154 CAI, 21 estaciones).
  *
- * NOTA DE DATOS:
- *   Si los datasets aún no se cargaron (TASK-GIS-007 pendiente),
- *   los endpoints devuelven 404 / arrays vacíos en lugar de error 500.
+ * ESTADO DE DATOS:
+ *   Si los archivos no existen (script no ejecutado), los endpoints devuelven
+ *   503 con mensaje claro. El servidor arranca igual — GIS es opcional.
  *
  * @module controllers/gisController
  */
 
 'use strict';
 
-const { pool } = require('../config/postgres');
+const fs   = require('fs');
+const path = require('path');
 
-// ─── helpers ─────────────────────────────────────────────────────────────────
+const DATA_DIR = path.join(__dirname, '..', 'data', 'gis');
+
+// ─── Mapa de localidades (estático — no cambia) ──────────────────────────────
+
+const LOCALIDADES = {
+  '01': 'Usaquén',       '02': 'Chapinero',       '03': 'Santa Fe',
+  '04': 'San Cristóbal', '05': 'Usme',             '06': 'Tunjuelito',
+  '07': 'Bosa',          '08': 'Kennedy',           '09': 'Fontibón',
+  '10': 'Engativá',      '11': 'Suba',             '12': 'Barrios Unidos',
+  '13': 'Teusaquillo',   '14': 'Los Mártires',     '15': 'Antonio Nariño',
+  '16': 'Puente Aranda', '17': 'La Candelaria',    '18': 'Rafael Uribe Uribe',
+  '19': 'Ciudad Bolívar','20': 'Sumapaz',
+};
+
+// ─── Carga de datos en memoria ────────────────────────────────────────────────
+
+let CUADRANTES = null;  // GeoJSON FeatureCollection
+let CAI        = null;  // array de puntos
+let ESTACIONES = null;  // array de puntos
+let GIS_READY  = false;
+
+function loadGisData() {
+  try {
+    const cuadFile = path.join(DATA_DIR, 'cuadrantes.geojson');
+    const caiFile  = path.join(DATA_DIR, 'cai.json');
+    const estFile  = path.join(DATA_DIR, 'estaciones.json');
+
+    if (!fs.existsSync(cuadFile) || !fs.existsSync(caiFile) || !fs.existsSync(estFile)) {
+      console.warn('[GIS] Archivos estáticos no encontrados en data/gis/.');
+      console.warn('[GIS] Ejecutar: node gis-sync-service/scripts/fetchGisStatic.js');
+      return;
+    }
+
+    CUADRANTES = JSON.parse(fs.readFileSync(cuadFile, 'utf8'));
+    CAI        = JSON.parse(fs.readFileSync(caiFile,  'utf8'));
+    ESTACIONES = JSON.parse(fs.readFileSync(estFile,  'utf8'));
+    GIS_READY  = true;
+
+    console.log(`[GIS] Datos cargados: ${CUADRANTES.features.length} cuadrantes, ${CAI.length} CAI, ${ESTACIONES.length} estaciones`);
+  } catch (err) {
+    console.error('[GIS] Error cargando datos estáticos:', err.message);
+  }
+}
+
+// Cargar al importar el módulo (startup del servidor)
+loadGisData();
+
+// ─── Algoritmos geoespaciales ─────────────────────────────────────────────────
 
 /**
- * Extrae lon/lat de req.query, valida y convierte a float.
- * @returns {{ lon: number, lat: number } | null}
+ * Ray casting point-in-polygon para un anillo lineal (array de [lon,lat]).
+ * Devuelve true si el punto está dentro del polígono (sin considerar huecos).
  */
+function rayInRing(lon, lat, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0], yi = ring[i][1];
+    const xj = ring[j][0], yj = ring[j][1];
+    if ((yi > lat) !== (yj > lat) &&
+        lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+/**
+ * Point-in-polygon para GeoJSON Polygon (usando solo el anillo exterior).
+ * Suficiente para cuadrantes — no tienen huecos relevantes.
+ */
+function inPolygon(lon, lat, coordinates) {
+  return rayInRing(lon, lat, coordinates[0]);
+}
+
+/**
+ * Point-in-polygon para GeoJSON Geometry (Polygon o MultiPolygon).
+ */
+function containsPoint(geometry, lon, lat) {
+  if (!geometry) return false;
+  if (geometry.type === 'Polygon') {
+    return inPolygon(lon, lat, geometry.coordinates);
+  }
+  if (geometry.type === 'MultiPolygon') {
+    return geometry.coordinates.some(poly => inPolygon(lon, lat, poly));
+  }
+  return false;
+}
+
+/**
+ * Distancia haversine en metros entre dos pares lat/lon WGS84.
+ */
+function haversineM(lat1, lon1, lat2, lon2) {
+  const R  = 6_371_000;
+  const p1 = lat1 * Math.PI / 180;
+  const p2 = lat2 * Math.PI / 180;
+  const dp = (lat2 - lat1) * Math.PI / 180;
+  const dl = (lon2 - lon1) * Math.PI / 180;
+  const a  = Math.sin(dp / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) ** 2;
+  return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+}
+
+// ─── Helpers de validación ────────────────────────────────────────────────────
+
 function parseLonLat(req) {
   const lon = parseFloat(req.query.lon);
   const lat = parseFloat(req.query.lat);
@@ -43,82 +139,58 @@ function parseLonLat(req) {
   return { lon, lat };
 }
 
-// ─── lookup ───────────────────────────────────────────────────────────────────
+function notReady(res) {
+  return res.status(503).json({
+    message: 'Datos GIS no disponibles. Ejecutar: node gis-sync-service/scripts/fetchGisStatic.js',
+  });
+}
+
+// ─── Endpoints ────────────────────────────────────────────────────────────────
 
 /**
  * GET /api/gis/lookup?lon=&lat=
  *
- * PROPÓSITO:
- *   Dado un punto GPS, resuelve toda la jerarquía territorial de Bogotá:
- *   localidad → UPZ → sector catastral → cuadrante policial (con teléfono).
- *   Un solo query ST_Contains sobre la tabla entornos, que tiene 59 384
- *   polígonos indexados con GIST — debería ejecutarse en <5ms.
+ * Busca el cuadrante policial que contiene el punto GPS.
+ * Itera los 599 cuadrantes con ray casting — ~<2ms en Node.js.
  *
- * FLUJO:
- *   1. Validar lon/lat.
- *   2. ST_Contains(e.geom, punto) → primer entorno que contiene el punto.
- *   3. JOIN cuadrantes → agrega pcu_telefono y nombre del CAI asignado.
- *   4. Si no hay resultado (punto fuera de Bogotá), devuelve 404.
- *
- * @param {import('express').Request}  req  Query: lon, lat
- * @param {import('express').Response} res
+ * Respuesta: { pcu_codigo, pcu_nombre, pcu_nom_cai, pcu_nom_est,
+ *              pcu_telefono, loc_codigo, loc_nombre }
  */
 async function lookup(req, res) {
+  if (!GIS_READY) return notReady(res);
+
   const coords = parseLonLat(req);
-  if (!coords) return res.status(400).json({ message: 'lon y lat son requeridos y deben ser válidos' });
+  if (!coords) return res.status(400).json({ message: 'lon y lat requeridos y válidos' });
 
   const { lon, lat } = coords;
 
-  try {
-    const { rows } = await pool.query(
-      `SELECT
-         e.loc_nombre,
-         e.upl_nombre,
-         e.sca_nombre,
-         e.pcu_codigo,
-         e.pcu_nombre,
-         c.pcu_telefono,
-         c.pcu_nom_cai,
-         c.pcu_nom_est
-       FROM entornos e
-       LEFT JOIN cuadrantes c ON c.pcu_codigo = e.pcu_codigo
-       WHERE ST_Contains(e.geom, ST_SetSRID(ST_MakePoint($1, $2), 4326))
-       LIMIT 1`,
-      [lon, lat]
-    );
+  const found = CUADRANTES.features.find(f => containsPoint(f.geometry, lon, lat));
 
-    if (rows.length === 0) {
-      return res.status(404).json({ message: 'Coordenadas fuera del área cubierta' });
-    }
+  if (!found) return res.status(404).json({ message: 'Coordenadas fuera del área cubierta' });
 
-    res.json(rows[0]);
-  } catch (err) {
-    console.error('[GIS lookup]', err.message);
-    res.status(500).json({ message: 'Error en consulta GIS' });
-  }
+  const p = found.properties;
+  res.json({
+    pcu_codigo:   p.pcu_codigo,
+    pcu_nombre:   p.pcu_codigo,   // campo normalizado
+    pcu_nom_cai:  p.pcu_nom_cai,
+    pcu_nom_est:  p.pcu_nom_est,
+    pcu_telefono: p.pcu_telefono,
+    loc_codigo:   p.loc_codigo,
+    loc_nombre:   LOCALIDADES[p.loc_codigo] ?? null,
+  });
 }
-
-// ─── near ─────────────────────────────────────────────────────────────────────
 
 /**
  * GET /api/gis/near?lon=&lat=&type=cai|estacion&limit=3
  *
- * PROPÓSITO:
- *   Devuelve los N POIs policiales más cercanos al punto dado,
- *   ordenados por distancia en metros (operador KNN <-> de PostGIS).
- *
- * FLUJO:
- *   1. Validar params.
- *   2. Según type, consultar tabla cai o estaciones_policia.
- *   3. ORDER BY geom <-> punto usa el índice GIST en modo KNN — no hace full scan.
- *   4. ST_Distance::geography calcula la distancia real sobre el esferoide.
- *
- * @param {import('express').Request}  req  Query: lon, lat, type, limit
- * @param {import('express').Response} res
+ * Devuelve los N puntos policiales más cercanos al GPS dado,
+ * ordenados por distancia haversine ascendente.
  */
 async function near(req, res) {
+  if (!GIS_READY) return notReady(res);
+
   const coords = parseLonLat(req);
-  if (!coords) return res.status(400).json({ message: 'lon y lat son requeridos' });
+  if (!coords) return res.status(400).json({ message: 'lon y lat requeridos' });
 
   const { lon, lat } = coords;
   const type  = req.query.type  || 'cai';
@@ -128,105 +200,41 @@ async function near(req, res) {
     return res.status(400).json({ message: 'type debe ser "cai" o "estacion"' });
   }
 
-  try {
-    let rows;
+  const source = type === 'cai' ? CAI : ESTACIONES;
 
-    if (type === 'cai') {
-      ({ rows } = await pool.query(
-        `SELECT
-           epo_nombre    AS nombre,
-           epo_direccion AS direccion,
-           epo_lat       AS lat,
-           epo_lon       AS lon,
-           NULL          AS telefono,
-           ROUND(ST_Distance(
-             geom::geography,
-             ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography
-           )::numeric) AS distancia_m
-         FROM cai
-         ORDER BY geom <-> ST_SetSRID(ST_MakePoint($1, $2), 4326)
-         LIMIT $3`,
-        [lon, lat, limit]
-      ));
-    } else {
-      ({ rows } = await pool.query(
-        `SELECT
-           epo_nombre    AS nombre,
-           epo_direccion AS direccion,
-           epo_lat       AS lat,
-           epo_lon       AS lon,
-           epo_telefono  AS telefono,
-           ROUND(ST_Distance(
-             geom::geography,
-             ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography
-           )::numeric) AS distancia_m
-         FROM estaciones_policia
-         ORDER BY geom <-> ST_SetSRID(ST_MakePoint($1, $2), 4326)
-         LIMIT $3`,
-        [lon, lat, limit]
-      ));
-    }
+  const result = source
+    .map(p => ({
+      nombre:      p.nombre,
+      direccion:   p.direccion,
+      lat:         p.lat,
+      lon:         p.lon,
+      telefono:    p.telefono ?? null,
+      distancia_m: haversineM(lat, lon, p.lat, p.lon),
+    }))
+    .sort((a, b) => a.distancia_m - b.distancia_m)
+    .slice(0, limit);
 
-    res.json(rows);
-  } catch (err) {
-    console.error('[GIS near]', err.message);
-    res.status(500).json({ message: 'Error en consulta GIS near' });
-  }
+  res.json(result);
 }
-
-// ─── heatmap ──────────────────────────────────────────────────────────────────
 
 /**
  * GET /api/gis/heatmap
  *
- * PROPÓSITO:
- *   Devuelve el GeoJSON de las 21 localidades de Bogotá junto con
- *   los datos de hurto de motos 2026 para renderizar un heatmap de riesgo.
- *   Se llama una vez al cargar el mapa — los datos cambian mensualmente.
- *
- * FORMATO RESPUESTA:
- *   { type: 'FeatureCollection', features: [...] }
- *   Cada feature: localidad + properties { loc_nombre, hm_2026, hm_total, quintil }
- *   El campo quintil (1-5) permite al frontend elegir el color de la capa.
- *
- * @param {import('express').Request}  req
- * @param {import('express').Response} res
+ * Devuelve los CAI agrupados por localidad para un heatmap básico de presencia policial.
+ * (Versión simplificada sin datos de hurtos — esos requieren PostgreSQL).
  */
 async function heatmap(req, res) {
-  try {
-    const { rows } = await pool.query(
-      `SELECT
-         l.loc_codigo,
-         l.loc_nombre,
-         ST_AsGeoJSON(l.geom)::json AS geojson,
-         COALESCE(d.hm_2026, 0)      AS hm_2026,
-         COALESCE(d.hm_total_anio, 0) AS hm_total,
-         NTILE(5) OVER (ORDER BY COALESCE(d.hm_2026, 0)) AS quintil
-       FROM localidades l
-       LEFT JOIN delitos_hurto_motos d ON d.loc_codigo = l.loc_codigo
-       ORDER BY l.loc_nombre`
-    );
+  if (!GIS_READY) return notReady(res);
 
-    const featureCollection = {
-      type: 'FeatureCollection',
-      features: rows.map(r => ({
-        type: 'Feature',
-        geometry: r.geojson,
-        properties: {
-          loc_codigo: r.loc_codigo,
-          loc_nombre: r.loc_nombre,
-          hm_2026:    r.hm_2026,
-          hm_total:   r.hm_total,
-          quintil:    r.quintil,
-        },
-      })),
-    };
-
-    res.json(featureCollection);
-  } catch (err) {
-    console.error('[GIS heatmap]', err.message);
-    res.status(500).json({ message: 'Error en consulta GIS heatmap' });
+  // Agrupar CAI por localidad como proxy de cobertura
+  const byLoc = {};
+  for (const cai of CAI) {
+    const loc = cai.loc_codigo ?? 'XX';
+    if (!byLoc[loc]) byLoc[loc] = { loc_codigo: loc, loc_nombre: LOCALIDADES[loc] ?? loc, count_cai: 0 };
+    byLoc[loc].count_cai++;
   }
+
+  res.json({ ok: true, localidades: Object.values(byLoc).sort((a, b) => a.loc_codigo.localeCompare(b.loc_codigo)) });
 }
 
 module.exports = { lookup, near, heatmap };
@@ -236,27 +244,34 @@ module.exports = { lookup, near, heatmap };
    ═══════════════════════════════════════════════════════════
 
    EXPLICACIÓN PARA HUMANO:
-   Este controlador responde tres preguntas que el frontend hace:
-   1. lookup  → "¿En qué cuadrante está esta coordenada GPS?"
-   2. near    → "¿Cuál es el CAI / estación más cercana a este punto?"
-   3. heatmap → "¿Cuántos robos de motos hubo en cada localidad este año?"
-   Todas las consultas tocan PostGIS directamente sobre índices GIST.
+   Al arrancar el servidor, este módulo carga 3 archivos JSON
+   del disco (data/gis/) y los mantiene en memoria. Cuando un
+   frontend pregunta "¿en qué cuadrante está esta coordenada?",
+   itera los 599 polígonos con ray casting puro — sin SQL, sin
+   PostGIS, sin dependencias externas. Para CAI cercanos usa
+   haversine sobre 154 puntos. Todo sub-2ms.
 
-   PSEUDOCÓDIGO:
-   lookup(lon, lat)
-     → ST_Contains(entornos.geom, punto) → { localidad, UPZ, cuadrante, teléfono }
-
-   near(lon, lat, type, limit)
-     → ORDER BY geom <-> punto LIMIT N → [{ nombre, dirección, distancia_m }]
-
-   heatmap()
-     → localidades JOIN delitos_hurto_motos → GeoJSON FeatureCollection
+   SETUP REQUERIDO (una sola vez):
+     node gis-sync-service/scripts/fetchGisStatic.js
 
    DIAGRAMA MENTAL:
-   Frontend ──GET /api/gis/lookup──► gisController ──SQL──► PostGIS
-                                         │
-                                    { cuadrante, teléfono, localidad }
-                                         │
-                                    Frontend muestra badge en mapa
+   Arranque servidor
+     → loadGisData() lee data/gis/*.json → memoria
+     → GIS_READY = true
+
+   GET /api/gis/lookup?lon=-74.07&lat=4.711
+     → parseLonLat() → { lon, lat }
+     → CUADRANTES.features.find(containsPoint) → feature
+     → res.json({ cuadrante, teléfono, localidad })
+
+   GET /api/gis/near?type=cai&limit=3
+     → CAI.map(haversineM).sort().slice(3)
+     → res.json([{ nombre, distancia_m }])
+
+   DEUDA TÉCNICA:
+   - Ray casting ignora huecos en polígonos (ningún cuadrante los tiene).
+   - Sin índice espacial — 599 iteraciones están bien, no escala a millones.
+   - heatmap devuelve conteo de CAI, no datos de hurtos (esos requieren PostGIS).
+   - Si OAIEE cambia los datos, hay que reejecutar fetchGisStatic.js y hacer push.
 
    ═══════════════════════════════════════════════════════════ */
