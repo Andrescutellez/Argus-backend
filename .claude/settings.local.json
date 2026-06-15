@@ -46,7 +46,18 @@
       "Bash(ssh -i ~/.ssh/argus_gcp -o ConnectTimeout=15 -o StrictHostKeyChecking=no andrescutellez@34.69.219.193 \"echo 'SSH OK' && whoami && hostname\")",
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(node scripts/fetchGisStatic.js)",
+      "Bash(git commit *)",
+      "PowerShell(Start-Process powershell -ArgumentList '-NoExit', '-Command', 'cd \"C:\\\\Users\\\\Leonardo\\\\Desktop\\\\Proyecto Argus\\\\argus-web-usuario\"; npm run dev')",
+      "Bash(npx claude-code-templates@latest --skill creative-design/ui-ux-pro-max)",
+      "Bash(npx claude-code-templates@latest --skill creative-design/frontend-design)",
+      "Bash(npx claude-code-templates@latest --skill creative-design/mobile-design)",
+      "PowerShell(Start-Process powershell -ArgumentList '-NoExit', '-Command', 'cd \"C:\\\\Users\\\\Leonardo\\\\Desktop\\\\Proyecto Argus\\\\argus-web-operador\"; npm run dev')",
+      "Bash(npx vite *)",
+      "Bash(flutter analyze *)",
+      "Bash(flutter pub *)",
+      "Bash(node -e \"const p = require\\('./package.json'\\); console.log\\(JSON.stringify\\(Object.keys\\(p.dependencies\\), null, 2\\)\\)\")"
     ],
     "additionalDirectories": [
       "c:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\argus_app",
