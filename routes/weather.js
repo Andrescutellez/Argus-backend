@@ -20,10 +20,12 @@
 
 const { Router } = require('express');
 const { authenticate } = require('../middleware/auth');
-const { lluvia } = require('../controllers/weatherController');
+const { lluvia, radarImage, radarBounds } = require('../controllers/weatherController');
 
 const router = Router();
 
-router.get('/lluvia', authenticate, lluvia);
+router.get('/lluvia',        authenticate, lluvia);
+router.get('/radar/image',   authenticate, radarImage);
+router.get('/radar/bounds',  authenticate, radarBounds);
 
 module.exports = router;
