@@ -21,7 +21,7 @@
 
 const { Router } = require('express');
 const { authenticate } = require('../middleware/auth');
-const { lookup, near, heatmap, cuadrantes, cuadrantesNear } = require('../controllers/gisController');
+const { lookup, near, heatmap, cuadrantes, cuadrantesNear, status } = require('../controllers/gisController');
 
 const router = Router();
 
@@ -30,5 +30,6 @@ router.get('/near',       authenticate, near);
 router.get('/heatmap',    authenticate, heatmap);
 router.get('/cuadrantes',      authenticate, cuadrantes);
 router.get('/cuadrantes-near', authenticate, cuadrantesNear);
+router.get('/status',          authenticate, status);
 
 module.exports = router;
