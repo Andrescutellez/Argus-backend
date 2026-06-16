@@ -24,6 +24,7 @@ const { isAllowed, verifySignature } = require('./deviceAuth');
 const { enqueue } = require('./queue');
 const Alert = require('../models/Alert');
 const DeviceState = require('../models/DeviceState');
+const DriveMetrics = require('../models/DriveMetrics');
 
 // ─── CONSTANTES DE CONFIGURACIÓN ─────────────────────────────────────────────
 
@@ -316,6 +317,94 @@ function parseEventPacket(line) {
   };
 }
 
+// ─── PARSER DE FRAMES DRIVE ───────────────────────────────────────────────────
+
+/**
+ * @brief Parsea una línea del protocolo Argus con formato DRIVE y extrae sus campos.
+ *
+ * PROPÓSITO:
+ *   Validar la estructura sintáctica de un frame de métricas de conducción antes
+ *   de cualquier validación semántica (auth, firma). El frame DRIVE transporta las
+ *   métricas acumuladas por el MPU6050 durante la ventana GPS (~30s en PREMIUM).
+ *
+ * FORMATO DEL FRAME:
+ *   "DRIVE|device_id|epoch_ms|lat|lon|peakAccelDev|peakGyroMag|hardCount|softCount|crc32\n"
+ *   Campos:  [0]    [1]       [2]  [3] [4]    [5]          [6]       [7]       [8]    [9]
+ *
+ * FIRMA CRC32:
+ *   El CRC32 se calcula con el mismo payload base que los frames ARGUS y EVENT:
+ *   "{deviceId}|{epoch}|{lat:.6f}|{lon:.6f}|{SECRET}"
+ *   Los campos de métricas (peakAccelDev, etc.) NO están en el CRC por diseño del
+ *   firmware (buildDriveFrame usa el mismo signatureBase que buildArgusPacket).
+ *   Esto es aceptable: la autenticidad del device está garantizada por la firma;
+ *   la integridad de las métricas depende de que el device sea legítimo.
+ *
+ * FLUJO LÓGICO:
+ *   1. Split por '|' → verificar exactamente 10 partes y prefijo 'DRIVE'.
+ *   2. Verificar que ningún campo esté vacío.
+ *   3. Convertir campos numéricos.
+ *   4. Retornar objeto o null si algo falla.
+ *
+ * @param {string} line — Línea completa del stream TCP (sin el \n final).
+ * @returns {{ deviceId, timestamp, lat, lon, peakAccelDev, peakGyroMag, hardCount, softCount, signature } | null}
+ */
+function parseDrivePacket(line) {
+  const parts = line.trim().split('|');
+
+  // 10 campos: DRIVE, deviceId, epoch, lat, lon, peakAccelDev, peakGyroMag, hardCount, softCount, crc32.
+  if (parts.length !== 10 || parts[0] !== 'DRIVE') return null;
+
+  const [, deviceId, timestamp, lat, lon, peakAccelDev, peakGyroMag, hardCount, softCount, signature] = parts;
+
+  if (!deviceId || !timestamp || !lat || !lon || !peakAccelDev || !peakGyroMag
+    || hardCount === '' || softCount === '' || !signature) return null;
+
+  return {
+    deviceId,
+    timestamp,
+    lat:          parseFloat(lat),
+    lon:          parseFloat(lon),
+    peakAccelDev: parseFloat(peakAccelDev),
+    peakGyroMag:  parseFloat(peakGyroMag),
+    hardCount:    parseInt(hardCount, 10),
+    softCount:    parseInt(softCount, 10),
+    signature,
+  };
+}
+
+/**
+ * @brief Persiste métricas de conducción en MongoDB (fire-and-forget).
+ *
+ * PROPÓSITO:
+ *   Encapsular el guardado async de DriveMetrics de forma que pueda llamarse
+ *   desde el handler TCP síncrono sin bloquear el event loop ni retrasar el ACK.
+ *   Mismo patrón que persistAlert(): se llama con .catch() para atrapar errores
+ *   sin generar UnhandledPromiseRejection.
+ *
+ * POR QUÉ NO SE AWAITA:
+ *   El ESP32 espera el ACK en milisegundos. MongoDB puede tardar 50-300ms.
+ *   Si esperáramos, el módulo SIM podría dar timeout y reenviar el frame,
+ *   generando documentos duplicados.
+ *
+ * DEPENDENCIAS:
+ *   - DriveMetrics (models/DriveMetrics.js)
+ *   - log: logger estructurado
+ *
+ * @param {object} data
+ * @param {string} data.deviceId
+ * @param {number|null} data.lat
+ * @param {number|null} data.lon
+ * @param {number} data.peakAccelDev
+ * @param {number} data.peakGyroMag
+ * @param {number} data.hardCount
+ * @param {number} data.softCount
+ * @param {Date}   data.timestamp
+ * @returns {Promise<void>}
+ */
+async function persistDriveMetrics({ deviceId, lat, lon, peakAccelDev, peakGyroMag, hardCount, softCount, timestamp }) {
+  await DriveMetrics.create({ deviceId, lat, lon, peakAccelDev, peakGyroMag, hardCount, softCount, timestamp });
+}
+
 /**
  * @brief Persiste una alerta en MongoDB y emite el evento WebSocket alert:new.
  *
@@ -561,6 +650,76 @@ function createTcpServer(io) {
           socket.write('ACK\r\n');
           flushCommands(socket, deviceId);
           continue; // No procesar este línea como frame GPS
+        }
+
+        // ── FRAME DE CONDUCCIÓN: DRIVE ───────────────────────────────────
+        if (line.startsWith('DRIVE|')) {
+          const drive = parseDrivePacket(line);
+          if (!drive) {
+            log('warn', 'tcp.drive.malformed', { remote, raw: line.slice(0, 140) });
+            socket.write('ERR\r\n');
+            continue;
+          }
+
+          // Misma auth que para GPS y EVENT.
+          if (!(await isAllowed(drive.deviceId))) {
+            log('warn', 'tcp.auth.unknown_device', { deviceId: drive.deviceId, remote });
+            failedAuthAttempts += 1;
+            socket.write('ERR\r\n');
+            if (failedAuthAttempts >= MAX_FAILED_AUTH) {
+              socket.destroy();
+              return;
+            }
+            continue;
+          }
+
+          // La firma CRC32 del frame DRIVE usa el mismo payload base que GPS y EVENT:
+          // "{deviceId}|{epoch}|{lat:.6f}|{lon:.6f}|{SECRET}". verifySignature espera
+          // (deviceId, timestamp, lat, lng, signature) con el cuarto param como 'lng'.
+          if (!verifySignature(drive.deviceId, drive.timestamp, drive.lat, drive.lon, drive.signature)) {
+            log('warn', 'tcp.auth.bad_signature', { deviceId: drive.deviceId, remote });
+            failedAuthAttempts += 1;
+            socket.write('ERR\r\n');
+            if (failedAuthAttempts >= MAX_FAILED_AUTH) {
+              socket.destroy();
+              return;
+            }
+            continue;
+          }
+
+          // Registrar el device si el DRIVE llega antes que el GPS frame de la sesión.
+          if (deviceId !== drive.deviceId) {
+            deviceId = drive.deviceId;
+            connectedDevices.set(deviceId, socket);
+            if (!commandQueues.has(deviceId)) commandQueues.set(deviceId, []);
+          }
+
+          // Coordenadas: guardar null si el ESP32 reporta 0,0 (sin fix GPS).
+          const driveLat = (isNaN(drive.lat) || (drive.lat === 0 && drive.lon === 0)) ? null : drive.lat;
+          const driveLon = (isNaN(drive.lon) || (drive.lat === 0 && drive.lon === 0)) ? null : drive.lon;
+
+          // Persistir en MongoDB: fire-and-forget (mismo patrón que persistAlert).
+          persistDriveMetrics({
+            deviceId,
+            lat:          driveLat,
+            lon:          driveLon,
+            peakAccelDev: isNaN(drive.peakAccelDev) ? 0 : drive.peakAccelDev,
+            peakGyroMag:  isNaN(drive.peakGyroMag)  ? 0 : drive.peakGyroMag,
+            hardCount:    isNaN(drive.hardCount)     ? 0 : drive.hardCount,
+            softCount:    isNaN(drive.softCount)     ? 0 : drive.softCount,
+            timestamp:    new Date(Number(drive.timestamp) || Date.now()),
+          }).catch((err) => log('error', 'tcp.drive.persist_error', { deviceId, err: err.message }));
+
+          log('info', 'tcp.drive.accepted', {
+            deviceId,
+            peakAccelDev: drive.peakAccelDev,
+            peakGyroMag:  drive.peakGyroMag,
+            hardCount:    drive.hardCount,
+            softCount:    drive.softCount,
+          });
+          socket.write('ACK\r\n');
+          flushCommands(socket, deviceId);
+          continue;
         }
 
         // ── PASO 1: Parseo sintáctico ─────────────────────────────────────

@@ -1,11 +1,13 @@
 /**
- * @fileoverview Script one-time para descargar datos GIS de OAIEE y guardarlos como JSON estático.
+ * @fileoverview Script manual para refrescar CAI/estaciones de OAIEE como JSON estático.
  *
  * PROPÓSITO:
- *   Alternativa a la sincronización vía PostgreSQL/PostGIS.
  *   Descarga cuadrantes, CAI y estaciones directamente de OAIEE y los persiste
  *   como archivos JSON en data/gis/ del backend principal.
  *   El backend carga estos archivos en memoria al arrancar — sin BD GIS necesaria.
+ *   Los cuadrantes nacionales (4,621) ya no dependen de este script — vienen en
+ *   vivo de la API Policía Nacional vía gisController.js. Esto solo cubre CAI/
+ *   estaciones de Bogotá, que no cambian con frecuencia.
  *
  * USO (correr desde gis-sync-service/):
  *   node scripts/fetchGisStatic.js

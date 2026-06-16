@@ -64,7 +64,24 @@
       "Bash(python3 -c \"import sys,json; p=json.load\\(sys.stdin\\); print\\(p.get\\('scripts',{}\\)\\)\")",
       "Bash(npm run *)",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5173/)",
-      "PowerShell(Start-Process \"http://localhost:5173\")"
+      "PowerShell(Start-Process \"http://localhost:5173\")",
+      "Bash(npm list *)",
+      "Bash(find \"C:\\\\Users\\\\Leonardo\\\\AppData\\\\Local\\\\Pub\\\\Cache\\\\hosted\\\\pub.dev\" -path \"*flutter_map*\" -name \"*.dart\" 2>/dev/null | grep -i overlay | head -8)",
+      "Read(//c/Users/Leonardo/AppData/Local/Pub/Cache/hosted/pub.dev/**)",
+      "Bash(dart analyze *)",
+      "Bash(idf.py -p COM3 flash monitor)",
+      "Read(//c/Users/Leonardo/.espressif/**)",
+      "Read(//c/Users/Leonardo/AppData/Roaming/Microsoft/Windows/Start Menu/Programs/**)",
+      "PowerShell(Get-Command idf.py -ErrorAction SilentlyContinue)",
+      "PowerShell($env:IDF_PATH)",
+      "Read(//c/Users/Leonardo/**)",
+      "Read(//c//**)",
+      "PowerShell(. \"C:\\\\esp\\\\v6.0\\\\esp-idf\\\\export.ps1\" 2>&1)",
+      "PowerShell(idf.py --version 2>&1)",
+      "PowerShell(Start-Process \"http://localhost:5174/\")",
+      "Bash(git check-ignore *)",
+      "Bash(rm check_braces.py)",
+      "Bash(dart format *)"
     ],
     "additionalDirectories": [
       "c:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\argus_app",
@@ -84,4 +101,5 @@
       "C:\\Users\\Leonardo\\Desktop\\Proyecto Argus"
     ]
   }
+  
 }

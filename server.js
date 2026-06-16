@@ -52,6 +52,7 @@ const fleetRoutes             = require('./routes/fleet');          // Rutas RES
 const manufacturedRoutes      = require('./routes/manufactured');   // Rutas REST para catálogo de MACs
 const gisRoutes               = require('./routes/gis');             // Rutas REST GIS — lookup, near, heatmap
 const weatherRoutes           = require('./routes/weather');          // Rutas REST weather — lluvia SAB
+const driveRoutes             = require('./routes/drive');             // Rutas REST conducción — métricas MPU6050
 const { startTcpServer } = require('./tcp/tcpServer'); // Servidor TCP para ESP32
 const { startWorker } = require('./tcp/queue');        // Worker que escribe batches a MongoDB
 
@@ -165,6 +166,7 @@ app.use('/api/fleet',         fleetRoutes);
 app.use('/api/manufactured',  manufacturedRoutes);
 app.use('/api/gis',           gisRoutes);
 app.use('/api/weather',       weatherRoutes);
+app.use('/api/drive',         driveRoutes);
 
 // ─── 11. MANEJADOR 404 CATCH-ALL ──────────────────────────────────────────────
 // En Express 5 los middlewares de error deben registrarse después de todas
