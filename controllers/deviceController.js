@@ -58,8 +58,9 @@ const VALID_COMMANDS = [
   'ARM',
   'DISARM',
   'ALERT',
-  'ENGINE_CUT',     // Confirmar robo → STATE_PURSUIT → motor cortado
-  'ENGINE_RESTORE', // Restaurar motor sin desarmar → STATE_IDLE (motor libre)
+  'ENGINE_CUT',       // Corte de motor preventivo/silencioso — sin cambio de estado
+  'ENGINE_RESTORE',   // Restaurar motor → STATE_IDLE (motor libre)
+  'PURSUIT_CONFIRM',  // Robo confirmado → STATE_PURSUIT → sirena + motor cortado
   'SENSITIVITY_VERY_LOW',
   'SENSITIVITY_LOW',
   'SENSITIVITY_MEDIUM',
@@ -182,10 +183,11 @@ async function saveCommandAlert(deviceId, command) {
   // Actualización optimista del estado para comandos que cambian el estado del device.
   // El device confirmará vía frame EVENT cuando ejecute el cambio.
   const stateUpdate = {};
-  if (command === 'ARM')            stateUpdate.armed = true;
-  if (command === 'DISARM')         { stateUpdate.armed = false; stateUpdate.state = 'STATE_IDLE'; }
-  if (command === 'ENGINE_CUT')     stateUpdate.state = 'STATE_PURSUIT'; // motor se cortará
-  if (command === 'ENGINE_RESTORE') stateUpdate.state = 'STATE_IDLE';    // motor se liberará
+  if (command === 'ARM')             stateUpdate.armed = true;
+  if (command === 'DISARM')          { stateUpdate.armed = false; stateUpdate.state = 'STATE_IDLE'; }
+  if (command === 'ENGINE_CUT')      stateUpdate.state = 'STATE_PURSUIT'; // UI: muestra "motor cortado"
+  if (command === 'ENGINE_RESTORE')  stateUpdate.state = 'STATE_IDLE';
+  if (command === 'PURSUIT_CONFIRM') stateUpdate.state = 'STATE_PURSUIT'; // robo confirmado → sirena
 
   if (Object.keys(stateUpdate).length > 0) {
     await DeviceState.findOneAndUpdate(
