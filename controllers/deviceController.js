@@ -58,7 +58,8 @@ const VALID_COMMANDS = [
   'ARM',
   'DISARM',
   'ALERT',
-  'ENGINE_CUT',
+  'ENGINE_CUT',     // Confirmar robo → STATE_PURSUIT → motor cortado
+  'ENGINE_RESTORE', // Restaurar motor sin desarmar → STATE_IDLE (motor libre)
   'SENSITIVITY_VERY_LOW',
   'SENSITIVITY_LOW',
   'SENSITIVITY_MEDIUM',
@@ -123,7 +124,8 @@ const getDeviceStatus = async (req, res) => {
     return res.status(200).json({
       deviceId,
       connected,
-      armed: state?.armed ?? false,         // false si nunca se armó (doc no existe)
+      armed: state?.armed ?? false,
+      state: state?.state ?? 'STATE_IDLE',  // STATE_PURSUIT = motor cortado
       lastSeen: latest?.timestamp ?? null,
       lat: latest?.lat ?? null,
       lon: latest?.lon ?? null,
@@ -177,12 +179,18 @@ async function saveCommandAlert(deviceId, command) {
     timestamp: new Date(),
   });
 
-  // Actualización optimista del estado del device para los comandos que cambian
-  // el flag systemArmed del firmware. El device confirmará después vía EVENT frame.
-  if (command === 'ARM' || command === 'DISARM') {
+  // Actualización optimista del estado para comandos que cambian el estado del device.
+  // El device confirmará vía frame EVENT cuando ejecute el cambio.
+  const stateUpdate = {};
+  if (command === 'ARM')            stateUpdate.armed = true;
+  if (command === 'DISARM')         { stateUpdate.armed = false; stateUpdate.state = 'STATE_IDLE'; }
+  if (command === 'ENGINE_CUT')     stateUpdate.state = 'STATE_PURSUIT'; // motor se cortará
+  if (command === 'ENGINE_RESTORE') stateUpdate.state = 'STATE_IDLE';    // motor se liberará
+
+  if (Object.keys(stateUpdate).length > 0) {
     await DeviceState.findOneAndUpdate(
       { deviceId },
-      { armed: command === 'ARM', updatedAt: new Date() },
+      { ...stateUpdate, updatedAt: new Date() },
       { upsert: true },
     );
   }

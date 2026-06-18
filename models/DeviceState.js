@@ -60,6 +60,19 @@ const DeviceStateSchema = new Schema(
     },
 
     /**
+     * Estado operativo actual del firmware ESP32.
+     * Espejo en tiempo real de la máquina de estados del device.
+     * Valores válidos: 'STATE_IDLE', 'STATE_MOVING', 'STATE_ALERT', 'STATE_PURSUIT'.
+     * Se actualiza por tcpServer.js al recibir frames EVENT del device,
+     * y de forma optimista por deviceController al enviar ENGINE_CUT / ENGINE_RESTORE.
+     * STATE_PURSUIT implica que el motor está cortado (setEngineCut(true) en firmware).
+     */
+    state: {
+      type: String,
+      default: 'STATE_IDLE',
+    },
+
+    /**
      * Cuándo fue la última actualización de este documento.
      * Útil para detectar devices cuyo estado no se ha actualizado en mucho tiempo
      * (posible desconexión prolongada o fallo de sincronización).

@@ -146,27 +146,22 @@ const lastSeen = new Map();
 function parsePacket(line) {
   const parts = line.trim().split('|');
 
-  // Se necesitan exactamente 6 campos: ARGUS, deviceId, timestamp, lat, lng, signature.
-  // Con 5 o 7 campos el frame es inválido; aceptarlo causaría errores de índice
-  // al desestructurar o datos incorrectos en la BD.
-  if (parts.length !== 6 || parts[0] !== 'ARGUS') return null;
+  // Frame v2: 7 campos — ARGUS|deviceId|timestamp|lat|lng|speed_kmh|crc32.
+  // speed está entre lng y la firma; no forma parte del CRC (es telemetría de display).
+  if (parts.length !== 7 || parts[0] !== 'ARGUS') return null;
 
-  const [, deviceId, timestamp, lat, lng, signature] = parts;
+  const [, deviceId, timestamp, lat, lng, speed, signature] = parts;
 
-  // Cualquier campo vacío indica un frame truncado o mal formateado.
-  // Es importante chequear signature aquí: un frame sin firma no puede
-  // pasar verifySignature() pero reportar el error como "malformado"
-  // es más preciso que "bad signature".
+  // speed puede ser "0.0" (moto detenida) — falsy como número pero válido.
+  // Solo validamos que los campos requeridos para la firma existan.
   if (!deviceId || !timestamp || !lat || !lng || !signature) return null;
 
-  // parseFloat convierte strings numéricos a Number. Si el string no es
-  // un número válido, retorna NaN; la validación de coordenadas más adelante
-  // capturará ese caso con isNaN().
   return {
     deviceId,
     timestamp,
-    lat: parseFloat(lat),
-    lng: parseFloat(lng),
+    lat:       parseFloat(lat),
+    lng:       parseFloat(lng),
+    speed:     parseFloat(speed) || 0,
     signature,
   };
 }
@@ -446,11 +441,21 @@ async function persistAlert({ deviceId, type, source, lat, lon, timestamp }) {
 
   // Los eventos ARM/DISARM son la fuente de verdad del estado del device.
   // Actualizar DeviceState aquí es la confirmación real de que el hardware ejecutó el cambio.
-  if (type === 'ARM' || type === 'DISARM') {
+  // Los eventos STATE_* también actualizan el campo state para que los frontends
+  // puedan derivar si el motor está cortado (STATE_PURSUIT) sin otra consulta.
+  const stateUpdate = {};
+  if (type === 'ARM')    stateUpdate.armed = true;
+  if (type === 'DISARM') { stateUpdate.armed = false; stateUpdate.state = 'STATE_IDLE'; }
+  if (type === 'STATE_IDLE')    stateUpdate.state = 'STATE_IDLE';
+  if (type === 'STATE_MOVING')  stateUpdate.state = 'STATE_MOVING';
+  if (type === 'STATE_ALERT')   stateUpdate.state = 'STATE_ALERT';
+  if (type === 'STATE_PURSUIT') stateUpdate.state = 'STATE_PURSUIT';
+
+  if (Object.keys(stateUpdate).length > 0) {
     await DeviceState.findOneAndUpdate(
       { deviceId },
-      { armed: type === 'ARM', updatedAt: new Date() },
-      { upsert: true }, // Crear el doc si no existe (primer ARM del device)
+      { ...stateUpdate, updatedAt: new Date() },
+      { upsert: true },
     );
   }
 
@@ -843,21 +848,18 @@ function createTcpServer(io) {
         enqueue({
           deviceId,
           lat,
-          lon: lng,                                              // El schema de Gps.js usa 'lon' (no 'lng')
-          timestamp: new Date(Number(packet.timestamp) || now), // Fallback a now si timestamp es inválido
+          lon:   lng,                                              // El schema de Gps.js usa 'lon' (no 'lng')
+          speed: packet.speed,                                     // km/h desde el GNSS del A7670
+          timestamp: new Date(Number(packet.timestamp) || now),   // Fallback a now si timestamp es inválido
         });
 
         // ── PASO 8: Push en tiempo real al frontend ───────────────────────
-        // Emitir el evento 'gps:update' a TODOS los clientes Socket.io conectados.
-        // io.emit() es broadcast: llega a todos. En un sistema con múltiples usuarios
-        // sería mejor io.to(roomId).emit() donde el room es el deviceId,
-        // así cada usuario solo recibe posiciones de sus propios dispositivos.
         if (io) {
           io.emit('gps:update', {
             deviceId,
             lat,
-            lon: lng,
-            speed: 0, // El protocolo TCP actual no transmite velocidad; se hardcodea 0
+            lon:   lng,
+            speed: packet.speed,   // km/h real del GNSS — 0 solo cuando la moto está quieta
             timestamp: new Date(Number(packet.timestamp) || now).toISOString(),
           });
         }
