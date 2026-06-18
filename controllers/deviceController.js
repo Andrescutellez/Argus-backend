@@ -126,7 +126,8 @@ const getDeviceStatus = async (req, res) => {
       deviceId,
       connected,
       armed: state?.armed ?? false,
-      state: state?.state ?? 'STATE_IDLE',  // STATE_PURSUIT = motor cortado
+      state: state?.state ?? 'STATE_IDLE',
+      motorCut: state?.motorCut ?? false,
       lastSeen: latest?.timestamp ?? null,
       lat: latest?.lat ?? null,
       lon: latest?.lon ?? null,
