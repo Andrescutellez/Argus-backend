@@ -46,12 +46,12 @@ const TCP_PORT = parseInt(process.env.TCP_PORT || '80', 10);
 /**
  * Milisegundos sin datos tras los cuales el servidor cierra la conexión.
  *
- * El ESP32 envía una posición cada ~30 segundos. 60 segundos de inactividad
- * significa que el device perdió señal, se reinició, o la red móvil cayó.
- * Destruir el socket libera el file descriptor y la memoria asociada al
- * buffer de esa conexión.
+ * En modo activo el ESP32 envía cada 30s. En inactividad (>5 min quieto),
+ * el firmware pausa la telemetría GPS y envía un keepalive cada 5 minutos.
+ * 10 minutos da margen sobre ese keepalive sin dejar sockets zombi demasiado
+ * tiempo en caso de pérdida de señal real.
  */
-const INACTIVITY_TIMEOUT_MS = 60_000;
+const INACTIVITY_TIMEOUT_MS = 600_000;
 
 /**
  * Intervalo mínimo en ms entre dos paquetes aceptados del mismo device.
@@ -838,7 +838,18 @@ function createTcpServer(io) {
           continue;
         }
 
-        // ── PASO 7: Escritura no bloqueante en MongoDB ────────────────────
+        // ── PASO 7: Keepalive — no guardar ni emitir ─────────────────────
+        // Cuando el firmware está en pausa por inactividad (moto quieta >5min),
+        // envía paquetes con epoch=0 para mantener el socket abierto sin que el
+        // servidor los interprete como posición real. Solo confirmamos recepción
+        // y despachamos comandos pendientes (ARM/DISARM siguen funcionando).
+        if (packet.timestamp === '0') {
+          socket.write('ACK\r\n');
+          flushCommands(socket, deviceId);
+          continue;
+        }
+
+        // ── PASO 8: Escritura no bloqueante en MongoDB ────────────────────
         // enqueue() agrega el dato a una cola en memoria (array JS).
         // Un worker (queue.js) drena esa cola cada 2 segundos con insertMany().
         // Esto desacopla la latencia de MongoDB de la latencia de respuesta al ESP32:
@@ -853,7 +864,7 @@ function createTcpServer(io) {
           timestamp: new Date(Number(packet.timestamp) || now),   // Fallback a now si timestamp es inválido
         });
 
-        // ── PASO 8: Push en tiempo real al frontend ───────────────────────
+        // ── PASO 9: Push en tiempo real al frontend ───────────────────────
         if (io) {
           io.emit('gps:update', {
             deviceId,
@@ -864,14 +875,14 @@ function createTcpServer(io) {
           });
         }
 
-        // ── PASO 9: Confirmación al device ───────────────────────────────
+        // ── PASO 10: Confirmación al device ──────────────────────────────
         // ACK\r\n indica al ESP32 que el paquete fue recibido y procesado.
         // El ESP32 espera este ACK antes de apagar el módulo de radio para
         // ahorrar batería. Sin el ACK, el ESP32 reintentaría (lógica en firmware).
         socket.write('ACK\r\n');
         log('info', 'tcp.packet.accepted', { deviceId, lat, lng });
 
-        // ── PASO 10: Despacho de comandos pendientes ──────────────────────
+        // ── PASO 11: Despacho de comandos pendientes ──────────────────────
         // Después del ACK, enviamos el próximo comando en la cola (si existe).
         // El device lee la respuesta después del ACK como un comando a ejecutar.
         // Esta secuencia (ACK → CMD en la misma respuesta) funciona porque el
