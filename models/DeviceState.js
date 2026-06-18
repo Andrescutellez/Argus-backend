@@ -64,12 +64,23 @@ const DeviceStateSchema = new Schema(
      * Espejo en tiempo real de la máquina de estados del device.
      * Valores válidos: 'STATE_IDLE', 'STATE_MOVING', 'STATE_ALERT', 'STATE_PURSUIT'.
      * Se actualiza por tcpServer.js al recibir frames EVENT del device,
-     * y de forma optimista por deviceController al enviar ENGINE_CUT / ENGINE_RESTORE.
-     * STATE_PURSUIT implica que el motor está cortado (setEngineCut(true) en firmware).
+     * y de forma optimista por deviceController al enviar PURSUIT_CONFIRM.
+     * STATE_PURSUIT implica alarma de persecución activa (sirena + motor cortado).
      */
     state: {
       type: String,
       default: 'STATE_IDLE',
+    },
+
+    /**
+     * Si el relé de corte de motor está activo actualmente.
+     * Independiente de `state`: el motor puede estar cortado (preventivo) sin que
+     * el firmware haya entrado en STATE_PURSUIT. Se activa con ENGINE_CUT y se limpia
+     * con ENGINE_RESTORE o DISARM. STATE_PURSUIT también lo implica, pero no al revés.
+     */
+    motorCut: {
+      type: Boolean,
+      default: false,
     },
 
     /**
