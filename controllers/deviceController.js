@@ -57,7 +57,8 @@ const { connectedDevices, sendCommand, getIo } = require('../tcp/tcpServer');
 const VALID_COMMANDS = [
   'ARM',
   'DISARM',
-  'ALERT',
+  'SIREN_ON',         // Bocina de búsqueda: buzzer ON sin cambiar estado de la máquina
+  'SIREN_OFF',        // Bocina de búsqueda: buzzer OFF sin cambiar estado
   'ENGINE_CUT',       // Corte de motor preventivo/silencioso — sin cambio de estado
   'ENGINE_RESTORE',   // Restaurar motor → STATE_IDLE (motor libre)
   'PURSUIT_CONFIRM',  // Robo confirmado → STATE_PURSUIT → sirena + motor cortado
@@ -168,9 +169,8 @@ const getDeviceStatus = async (req, res) => {
  * @returns {Promise<void>}
  */
 async function saveCommandAlert(deviceId, command) {
-  // 'ALERT' como comando significa "forzar alerta remota". En el modelo Alert,
-  // 'STATE_ALERT' es el estado del device; usamos 'ALERT_CMD' para diferenciarlos.
-  const alertType = command === 'ALERT' ? 'ALERT_CMD' : command;
+  // Normalizar tipo para evitar colisión con los tipos de estado del device.
+  const alertType = command === 'SIREN_ON' ? 'SIREN_ON_CMD' : command;
 
   const alert = await Alert.create({
     deviceId,
