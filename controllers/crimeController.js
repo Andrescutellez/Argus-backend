@@ -31,8 +31,11 @@
 
 const https = require('https');
 const http  = require('http');
+const fs    = require('fs');
+const path  = require('path');
 
-const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 horas
+const CACHE_TTL_MS   = 24 * 60 * 60 * 1000; // 24 horas
+const STATIC_FILE    = path.join(__dirname, '../data/bogota-crime-static.json');
 
 // Servidores de gobierno usan CAs no estándar
 const HTTPS_AGENT_GOV = new https.Agent({ rejectUnauthorized: false });
@@ -152,17 +155,31 @@ function getBogotaCacheSync() {
  *   server.js llama warmCache() con un delay de 5s (para que MongoDB conecte primero).
  *   Sin esto, el riskMonitor no opera hasta que algún cliente web llame /api/crime/bogota.
  */
+/**
+ * Intenta OAIEE; si falla y existe el archivo estático, lo usa como respaldo.
+ * El OAIEE solo es accesible desde redes colombianas — desde GCP Europa siempre falla.
+ */
+async function buildBogotaDataWithFallback() {
+  try {
+    return await buildBogotaData();
+  } catch (err) {
+    if (fs.existsSync(STATIC_FILE)) {
+      console.warn('[crime] OAIEE inalcanzable — cargando datos estáticos:', STATIC_FILE);
+      return JSON.parse(fs.readFileSync(STATIC_FILE, 'utf8'));
+    }
+    throw err;
+  }
+}
+
 async function warmCache() {
   if (_bogotaCache.data) return;
   try {
-    const data = await buildBogotaData();
+    const data = await buildBogotaDataWithFallback();
     _bogotaCache.data = data;
     _bogotaCache.ts   = Date.now();
     console.log('[crime] Cache de criminalidad calentado en arranque');
   } catch (err) {
-    // Si OAIEE no está disponible al arrancar, el sistema funciona sin ARI
-    // hasta que el cache se pueble en la primera petición HTTP.
-    console.warn('[crime] warmCache falló (se reintentará en la primera request):', err.message);
+    console.warn('[crime] warmCache falló (no hay OAIEE ni archivo estático):', err.message);
   }
 }
 
@@ -450,7 +467,7 @@ async function getFromCache(cache, builder, label) {
  */
 async function getBogota(req, res) {
   try {
-    const { data, cached } = await getFromCache(_bogotaCache, buildBogotaData, 'Bogotá');
+    const { data, cached } = await getFromCache(_bogotaCache, buildBogotaDataWithFallback, 'Bogotá');
     return res.json({ ...data, cached });
   } catch (err) {
     if (_bogotaCache.data) {
@@ -479,7 +496,7 @@ async function getBogotaLookup(req, res) {
   }
 
   try {
-    const { data } = await getFromCache(_bogotaCache, buildBogotaData, 'Bogotá');
+    const { data } = await getFromCache(_bogotaCache, buildBogotaDataWithFallback, 'Bogotá');
 
     const total    = data.features.length;
     const withGeom = data.features.filter(f => f.geometry).length;
@@ -543,6 +560,8 @@ module.exports = {
   getBogota, getBogotaLookup, getNacional,
   // Exportados para riskMonitor.js y server.js:
   calculateARI, getBogotaCacheSync, pointInGeoJsonGeom, warmCache,
+  // Exportado para scripts/fetch-crime-data.js (descarga local de datos OAIEE):
+  buildBogotaData,
 };
 
 
