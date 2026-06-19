@@ -187,6 +187,44 @@ function rayInRing(lon, lat, ring) {
   return inside;
 }
 
+/** Distancia Haversine en km entre dos puntos WGS-84. */
+function haversineKm(lon1, lat1, lon2, lat2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+/** Centroide aproximado del primer anillo de un Polygon/MultiPolygon. */
+function approxCentroid(geom) {
+  const ring = geom.type === 'Polygon'
+    ? geom.coordinates[0]
+    : geom.coordinates[0][0];
+  if (!ring || ring.length === 0) return null;
+  const sum = ring.reduce((acc, p) => [acc[0] + p[0], acc[1] + p[1]], [0, 0]);
+  return [sum[0] / ring.length, sum[1] / ring.length];
+}
+
+/**
+ * Busca la localidad más cercana por centroide cuando el ray casting falla.
+ * Útil cuando el GPS cae en el borde exacto de un polígono o tiene deriva leve.
+ * Límite: 10 km — si la moto está más lejos, probablemente no está en Bogotá.
+ */
+function nearestLocalidad(features, lon, lat) {
+  const MAX_KM = 10;
+  let best = null, bestDist = Infinity;
+  for (const f of features) {
+    if (!f.geometry) continue;
+    const c = approxCentroid(f.geometry);
+    if (!c) continue;
+    const d = haversineKm(lon, lat, c[0], c[1]);
+    if (d < bestDist) { bestDist = d; best = f; }
+  }
+  return bestDist <= MAX_KM ? best : null;
+}
+
 function pointInGeoJsonGeom(geom, lon, lat) {
   if (!geom) return false;
   if (geom.type === 'Polygon') {
@@ -432,20 +470,28 @@ async function getBogotaLookup(req, res) {
 
   try {
     const { data } = await getFromCache(_bogotaCache, buildBogotaData, 'Bogotá');
-    const match = data.features.find(f =>
+
+    // Intento 1: ray casting exacto
+    let match = data.features.find(f =>
       f.geometry && pointInGeoJsonGeom(f.geometry, lon, lat)
     );
+
+    // Intento 2: centroide más cercano (hasta 10 km).
+    // Cubre casos donde el GPS cae en el borde del polígono o tiene deriva leve del A7670.
+    if (!match) match = nearestLocalidad(data.features, lon, lat);
+
     if (!match) {
       return res.status(404).json({ message: 'Punto fuera de las localidades de Bogotá' });
     }
-    // ARI dinámico: incluye hora actual del servidor (el risk_score estático no considera la hora)
+
     const ari = calculateARI(match.properties);
     return res.json({ ...match.properties, ari });
   } catch (err) {
     if (_bogotaCache.data) {
-      const match = _bogotaCache.data.features.find(f =>
+      let match = _bogotaCache.data.features.find(f =>
         f.geometry && pointInGeoJsonGeom(f.geometry, lon, lat)
       );
+      if (!match) match = nearestLocalidad(_bogotaCache.data.features, lon, lat);
       if (match) return res.json({ ...match.properties, stale: true });
     }
     console.error('[crime] getBogotaLookup error:', err.message);
