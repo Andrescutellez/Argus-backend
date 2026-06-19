@@ -81,6 +81,91 @@ function getJson(urlStr, govAgent = false) {
   });
 }
 
+// ─── ARI — Argus Risk Index ───────────────────────────────────────────────────
+
+/**
+ * Calcula el Argus Risk Index (ARI) dinámico para una localidad.
+ *
+ * PROPÓSITO:
+ *   Transforma los datos de criminalidad estáticos en un índice accionable
+ *   que varía según el contexto temporal. Un mismo barrio tiene distinto
+ *   nivel de riesgo a las 2pm que a las 10pm.
+ *
+ * FÓRMULA:
+ *   base     = normalize(motos_2026, 0, 200) × 100
+ *   base    *= trendFactor(motos_var_pct)     // +30% máx si crece, −20% máx si baja
+ *   base    *= 1.3  si hora Bogotá ∈ [18, 24) ∪ [0, 6)  // nocturno
+ *   base    *= 0.85 si camaras_total ≥ 20                // disuasión alta
+ *   base    *= 0.90 si camaras_total ∈ [10, 20)          // disuasión media
+ *   ARI      = clamp(round(base), 0, 100)
+ *
+ * @param {object} props          Properties del feature GeoJSON (motos_2026, motos_var_pct, camaras_total).
+ * @param {number} [hourUTC]      Hora UTC (0-23). Default: hora actual del servidor.
+ * @returns {number}              ARI 0-100 donde 0=sin riesgo y 100=riesgo extremo.
+ *
+ * @note La conversión UTC→Bogotá usa UTC-5. Colombia no tiene DST.
+ */
+function calculateARI(props, hourUTC = new Date().getUTCHours()) {
+  const motos = props.motos_2026 ?? 0;
+  if (motos === 0) return 0;
+
+  // Base lineal: 200 hurtos/año = 100 ARI (umbral de la localidad más crítica)
+  let ari = Math.min(100, (motos / 200) * 100);
+
+  // Tendencia: si los hurtos están subiendo, el riesgo futuro es mayor
+  const varPct = props.motos_var_pct ?? 0;
+  ari *= varPct > 0
+    ? 1 + Math.min(varPct / 200, 0.30)   // máx +30% si sube
+    : 1 + Math.max(varPct / 200, -0.20); // máx −20% si baja
+
+  // Hora en Bogotá (UTC-5, Colombia no tiene horario de verano)
+  const hourBog = (hourUTC - 5 + 24) % 24;
+  // El 70% de hurtos de motos ocurre entre 6pm y medianoche según OAIEE histórico
+  if (hourBog >= 18 || hourBog < 6) ari *= 1.30;
+
+  // Cobertura de cámaras: disuasión documentada en zonas de alta vigilancia
+  const camaras = props.camaras_total ?? 0;
+  if      (camaras >= 20) ari *= 0.80;
+  else if (camaras >= 10) ari *= 0.90;
+
+  return Math.round(Math.min(100, Math.max(0, ari)));
+}
+
+/**
+ * Retorna el FeatureCollection de Bogotá desde el cache en memoria (síncrono).
+ *
+ * PROPÓSITO:
+ *   Permite que riskMonitor.js haga lookup de ARI sin HTTP adicional.
+ *   El cache se pobla en la primera request a /api/crime/bogota o via warmCache().
+ *
+ * @returns {GeoJSON.FeatureCollection | null}  null si el cache aún no fue poblado.
+ */
+function getBogotaCacheSync() {
+  return _bogotaCache.data ?? null;
+}
+
+/**
+ * Pre-carga el cache de criminalidad Bogotá en el arranque del servidor.
+ *
+ * PROPÓSITO:
+ *   Para que riskMonitor.js pueda calcular ARI desde el primer paquete GPS,
+ *   server.js llama warmCache() con un delay de 5s (para que MongoDB conecte primero).
+ *   Sin esto, el riskMonitor no opera hasta que algún cliente web llame /api/crime/bogota.
+ */
+async function warmCache() {
+  if (_bogotaCache.data) return;
+  try {
+    const data = await buildBogotaData();
+    _bogotaCache.data = data;
+    _bogotaCache.ts   = Date.now();
+    console.log('[crime] Cache de criminalidad calentado en arranque');
+  } catch (err) {
+    // Si OAIEE no está disponible al arrancar, el sistema funciona sin ARI
+    // hasta que el cache se pueble en la primera petición HTTP.
+    console.warn('[crime] warmCache falló (se reintentará en la primera request):', err.message);
+  }
+}
+
 // ─── Algoritmo geoespacial (mismo que gisController) ─────────────────────────
 
 /**
@@ -353,7 +438,9 @@ async function getBogotaLookup(req, res) {
     if (!match) {
       return res.status(404).json({ message: 'Punto fuera de las localidades de Bogotá' });
     }
-    return res.json(match.properties);
+    // ARI dinámico: incluye hora actual del servidor (el risk_score estático no considera la hora)
+    const ari = calculateARI(match.properties);
+    return res.json({ ...match.properties, ari });
   } catch (err) {
     if (_bogotaCache.data) {
       const match = _bogotaCache.data.features.find(f =>
@@ -387,7 +474,11 @@ async function getNacional(req, res) {
   }
 }
 
-module.exports = { getBogota, getBogotaLookup, getNacional };
+module.exports = {
+  getBogota, getBogotaLookup, getNacional,
+  // Exportados para riskMonitor.js y server.js:
+  calculateARI, getBogotaCacheSync, pointInGeoJsonGeom, warmCache,
+};
 
 
 /* ═══════════════════════════════════════════════════════════

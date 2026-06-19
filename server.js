@@ -54,6 +54,7 @@ const gisRoutes               = require('./routes/gis');             // Rutas RE
 const weatherRoutes           = require('./routes/weather');          // Rutas REST weather — lluvia SAB
 const driveRoutes             = require('./routes/drive');             // Rutas REST conducción — métricas MPU6050
 const crimeRoutes             = require('./routes/crime');             // Rutas REST criminalidad — hurtos motos/autos por localidad
+const { warmCache: warmCrimeCache } = require('./controllers/crimeController'); // Pre-carga ARI cache
 const { startTcpServer } = require('./tcp/tcpServer'); // Servidor TCP para ESP32
 const { startWorker } = require('./tcp/queue');        // Worker que escribe batches a MongoDB
 
@@ -117,6 +118,11 @@ startWorker();
 // Le pasamos io para que el servidor TCP pueda emitir eventos WebSocket
 // directamente cuando recibe un paquete GPS válido del ESP32.
 startTcpServer(io);
+
+// Pre-carga el cache de criminalidad para que riskMonitor.js pueda calcular
+// ARI desde el primer paquete GPS, sin esperar a que alguien abra la web.
+// El delay de 8s da margen para que MongoDB y la conexión a OAIEE estén listos.
+setTimeout(() => warmCrimeCache(), 8000);
 
 // ─── 8. MIDDLEWARE GLOBAL DE EXPRESS ─────────────────────────────────────────
 

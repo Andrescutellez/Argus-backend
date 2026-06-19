@@ -22,6 +22,7 @@ const net = require('net'); // Módulo nativo de Node.js para sockets TCP crudos
 const { log } = require('./logger');
 const { isAllowed, verifySignature } = require('./deviceAuth');
 const { enqueue } = require('./queue');
+const { checkRiskZone } = require('./riskMonitor'); // ARI: vigilancia reforzada automática
 const Alert = require('../models/Alert');
 const DeviceState = require('../models/DeviceState');
 const DriveMetrics = require('../models/DriveMetrics');
@@ -874,6 +875,17 @@ function createTcpServer(io) {
             timestamp: new Date(Number(packet.timestamp) || now).toISOString(),
           });
         }
+
+        // ── PASO 9b: Monitor de riesgo ARI — fire-and-forget ─────────────
+        // Verifica si la moto entró/salió de zona de alto riesgo y actúa
+        // automáticamente (ajuste de sensibilidad MPU6050 + push al frontend).
+        // Se pasa un callback en vez de importar sendCommand directamente para
+        // evitar dependencia circular: tcpServer ↔ riskMonitor.
+        // .catch() asegura que un error aquí NO interrumpa el ACK al ESP32.
+        checkRiskZone(deviceId, lat, lng, io, (dId, cmd) => {
+          const q = commandQueues.get(dId);
+          if (q) q.push(cmd);
+        }).catch((err) => log('error', 'risk.check.error', { deviceId, err: err.message }));
 
         // ── PASO 10: Confirmación al device ──────────────────────────────
         // ACK\r\n indica al ESP32 que el paquete fue recibido y procesado.
