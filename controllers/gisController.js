@@ -254,7 +254,7 @@ function notReady(res) {
 
 function noLocalData(res, type) {
   return res.status(503).json({
-    message: `Datos de ${type} no disponibles. Ejecutar: node gis-sync-service/scripts/fetchGisStatic.js`,
+    message: `Datos de ${type} no disponibles. Verificar archivos en data/gis/.`,
   });
 }
 
