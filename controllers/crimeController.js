@@ -278,6 +278,16 @@ async function buildBogotaData() {
     getJson(LOCALIDADES_URL, true),
   ]);
 
+  // Diagnóstico: si el OAIEE devuelve error o features vacíos, lanzar para que el caller lo vea en logs
+  if (locRes.error) {
+    throw new Error(`OAIEE localidades error ${locRes.error.code}: ${locRes.error.message}`);
+  }
+  const locFeatures = locRes.features || [];
+  console.log(`[crime] OAIEE: ${locFeatures.length} localidades, ${(delRes.features||[]).length} delitos, ${(camRes.features||[]).length} cámaras`);
+  if (locFeatures.length === 0) {
+    throw new Error(`OAIEE localidades devolvió 0 features — respuesta: ${JSON.stringify(locRes).slice(0, 300)}`);
+  }
+
   // Índices por código de localidad
   const delMap = {};
   for (const f of (delRes.features || [])) {
@@ -312,7 +322,7 @@ async function buildBogotaData() {
 
   // Construir FeatureCollection GeoJSON
   const features = [];
-  for (const f of (locRes.features || [])) {
+  for (const f of locFeatures) {
     const code  = f.attributes.LOCCODIGO;
     const crime = delMap[code] || {};
     const cams  = camMap[code] || {};
@@ -471,6 +481,10 @@ async function getBogotaLookup(req, res) {
   try {
     const { data } = await getFromCache(_bogotaCache, buildBogotaData, 'Bogotá');
 
+    const total    = data.features.length;
+    const withGeom = data.features.filter(f => f.geometry).length;
+    console.log(`[crime] lookup (${lat},${lon}) — features:${total} conGeom:${withGeom}`);
+
     // Intento 1: ray casting exacto
     let match = data.features.find(f =>
       f.geometry && pointInGeoJsonGeom(f.geometry, lon, lat)
@@ -478,12 +492,17 @@ async function getBogotaLookup(req, res) {
 
     // Intento 2: centroide más cercano (hasta 10 km).
     // Cubre casos donde el GPS cae en el borde del polígono o tiene deriva leve del A7670.
-    if (!match) match = nearestLocalidad(data.features, lon, lat);
+    if (!match) {
+      console.log(`[crime] ray casting falló — intentando nearestLocalidad`);
+      match = nearestLocalidad(data.features, lon, lat);
+    }
 
     if (!match) {
+      console.log(`[crime] nearestLocalidad también falló — 404`);
       return res.status(404).json({ message: 'Punto fuera de las localidades de Bogotá' });
     }
 
+    console.log(`[crime] match: ${match.properties.nombre}`);
     const ari = calculateARI(match.properties);
     return res.json({ ...match.properties, ari });
   } catch (err) {
