@@ -22,7 +22,8 @@ const net = require('net'); // Módulo nativo de Node.js para sockets TCP crudos
 const { log } = require('./logger');
 const { isAllowed, verifySignature } = require('./deviceAuth');
 const { enqueue } = require('./queue');
-const { checkRiskZone } = require('./riskMonitor'); // ARI: vigilancia reforzada automática
+const { checkRiskZone } = require('./riskMonitor');       // ARI: vigilancia reforzada automática
+const { checkGeofence } = require('./geofenceMonitor');   // Geocerca: detecta salida de zona
 const Alert = require('../models/Alert');
 const DeviceState = require('../models/DeviceState');
 const DriveMetrics = require('../models/DriveMetrics');
@@ -876,7 +877,17 @@ function createTcpServer(io) {
           });
         }
 
-        // ── PASO 9b: Monitor de riesgo ARI — fire-and-forget ─────────────
+        // ── PASO 9b: Monitor de geocerca — fire-and-forget ───────────────
+        // Evalúa si el device tiene geocerca activa y si este GPS frame está
+        // dentro o fuera del radio. Con histéresis de 2 puntos para evitar
+        // falsos positivos por drift de GPS. Si confirma salida: envía
+        // CMD|PARK_MODE_OFF + emite 'geofence:exit' por socket.
+        checkGeofence(deviceId, lat, lng, io, (dId, cmd) => {
+          const q = commandQueues.get(dId);
+          if (q) q.push(cmd);
+        }).catch((err) => log('error', 'geofence.check.error', { deviceId, err: err.message }));
+
+        // ── PASO 9c: Monitor de riesgo ARI — fire-and-forget ─────────────
         // Verifica si la moto entró/salió de zona de alto riesgo y actúa
         // automáticamente (ajuste de sensibilidad MPU6050 + push al frontend).
         // Se pasa un callback en vez de importar sendCommand directamente para

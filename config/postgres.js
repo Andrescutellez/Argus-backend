@@ -162,7 +162,28 @@ async function initPostgres() {
     )
   `);
 
-  console.log('[PG] Schema listo (users, user_devices, motos, devices, subscriptions, audit_log, manufactured_devices)');
+  /**
+   * parking_geofences — geocercas de estacionamiento activas por dispositivo.
+   * Solo puede haber una activa por device_id a la vez (enforced por la lógica
+   * del modelo: createGeofence() desactiva la anterior antes de insertar).
+   * expires_at: 24h por defecto; si el usuario se olvida de desarmar, la geocerca
+   * caduca y el backend deja de evaluar salidas de zona para ese device.
+   */
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS parking_geofences (
+      id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+      device_id  VARCHAR(50) NOT NULL,
+      user_id    UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      lat        DOUBLE PRECISION NOT NULL,
+      lng        DOUBLE PRECISION NOT NULL,
+      radius_m   INTEGER     NOT NULL DEFAULT 80,
+      active     BOOLEAN     NOT NULL DEFAULT true,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      expires_at TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '24 hours'
+    )
+  `);
+
+  console.log('[PG] Schema listo (users, user_devices, motos, devices, subscriptions, audit_log, manufactured_devices, parking_geofences)');
 }
 
 /**

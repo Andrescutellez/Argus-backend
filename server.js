@@ -54,7 +54,9 @@ const gisRoutes               = require('./routes/gis');             // Rutas RE
 const weatherRoutes           = require('./routes/weather');          // Rutas REST weather — lluvia SAB
 const driveRoutes             = require('./routes/drive');             // Rutas REST conducción — métricas MPU6050
 const crimeRoutes             = require('./routes/crime');             // Rutas REST criminalidad — hurtos motos/autos por localidad
+const geofenceRoutes          = require('./routes/geofence');           // Rutas REST geocercas de estacionamiento
 const { warmCache: warmCrimeCache } = require('./controllers/crimeController'); // Pre-carga ARI cache
+const { warmGeofenceCache } = require('./tcp/geofenceMonitor');                  // Pre-carga geocercas activas
 const { startTcpServer } = require('./tcp/tcpServer'); // Servidor TCP para ESP32
 const { startWorker } = require('./tcp/queue');        // Worker que escribe batches a MongoDB
 
@@ -124,6 +126,12 @@ startTcpServer(io);
 // El delay de 8s da margen para que MongoDB y la conexión a OAIEE estén listos.
 setTimeout(() => warmCrimeCache(), 8000);
 
+// Pre-carga geocercas activas desde PostgreSQL al cache en memoria.
+// geofenceMonitor.js usa ese cache por GPS frame — sin este warm-up, la primera
+// evaluación post-reinicio de servidor haría una query a PG (lento) o peor, no
+// detectaría salidas de zona si el servidor reiniició mientras la moto estaba estacionada.
+setTimeout(() => warmGeofenceCache(), 3000);
+
 // ─── 8. MIDDLEWARE GLOBAL DE EXPRESS ─────────────────────────────────────────
 
 // express.json() parsea el body de requests con Content-Type: application/json.
@@ -175,6 +183,7 @@ app.use('/api/gis',           gisRoutes);
 app.use('/api/weather',       weatherRoutes);
 app.use('/api/drive',         driveRoutes);
 app.use('/api/crime',         crimeRoutes);
+app.use('/api/geofence',      geofenceRoutes);
 
 // ─── 11. MANEJADOR 404 CATCH-ALL ──────────────────────────────────────────────
 // En Express 5 los middlewares de error deben registrarse después de todas
