@@ -93,4 +93,23 @@ async function deleteMoto(motoId) {
   await getPool().query('DELETE FROM motos WHERE id = $1', [motoId]);
 }
 
-module.exports = { createMoto, getMotosByUser, getMotoById, updateMoto, deleteMoto };
+/**
+ * @brief Busca la moto asociada a un deviceId ESP32.
+ *        Hace JOIN devices → motos para obtener los datos de la moto
+ *        desde el identificador del dispositivo que envía los paquetes TCP.
+ * @param {string} deviceId  p.ej. 'ARGUS-1237E630'
+ * @returns {Promise<object|null>} Fila de motos, o null si no hay moto asignada.
+ */
+async function getMotoByDeviceId(deviceId) {
+  const { rows } = await getPool().query(
+    `SELECT m.*
+     FROM devices d
+     JOIN motos m ON m.id = d.moto_id
+     WHERE d.device_id = $1
+     LIMIT 1`,
+    [deviceId],
+  );
+  return rows[0] ?? null;
+}
+
+module.exports = { createMoto, getMotosByUser, getMotoById, getMotoByDeviceId, updateMoto, deleteMoto };

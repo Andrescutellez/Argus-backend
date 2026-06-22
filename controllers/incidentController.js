@@ -27,7 +27,7 @@
 'use strict';
 
 const Incident = require('../models/Incident');
-const Moto     = require('../models/Moto');
+const { getMotoByDeviceId } = require('../models/Moto');
 const { getIo } = require('../services/socketService');
 const { log }   = require('../tcp/logger');
 
@@ -56,7 +56,7 @@ function buildActor(user, platform = null) {
  */
 async function getMotoInfo(deviceId) {
   try {
-    const moto = await Moto.findOne({ device_id: deviceId }).lean();
+    const moto = await getMotoByDeviceId(deviceId);
     if (!moto) return null;
     return {
       alias:  moto.alias  ?? null,
