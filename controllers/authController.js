@@ -219,4 +219,58 @@ const me = async (req, res) => {
   }
 };
 
-module.exports = { register, login, me };
+/**
+ * @brief Crea un agente de reacción. Solo accesible para SUPER_ADMIN.
+ *
+ * PROPÓSITO:
+ *   El registro de agentes es cerrado — no pueden registrarse solos.
+ *   El super admin los crea desde el web operador con email + contraseña temporal.
+ *   Se crea con role: 'REACTION' y sin dispositivos asociados.
+ *
+ * POST /api/auth/agents
+ * Body: { email, password }
+ * Auth: Bearer SUPER_ADMIN
+ */
+const createAgent = async (req, res) => {
+  const { email, password } = req.body ?? {};
+
+  if (!email || !password) {
+    return res.status(400).json({ message: 'Email y contraseña requeridos' });
+  }
+
+  const existing = await User.findByEmail(email);
+  if (existing) {
+    return res.status(409).json({ message: 'El email ya está registrado' });
+  }
+
+  try {
+    const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+    const user = await User.createUser({ email, passwordHash, role: 'REACTION' });
+
+    return res.status(201).json({
+      id:    user.id,
+      email: user.email,
+      role:  user.role,
+      createdAt: user.created_at,
+    });
+  } catch (err) {
+    console.error('[AUTH] createAgent error:', err.message);
+    return res.status(500).json({ message: 'Error interno del servidor' });
+  }
+};
+
+/**
+ * @brief Lista todos los agentes de reacción. Solo SUPER_ADMIN.
+ *
+ * GET /api/auth/agents
+ */
+const listAgents = async (req, res) => {
+  try {
+    const agents = await User.findAllByRole('REACTION');
+    return res.status(200).json(agents);
+  } catch (err) {
+    return res.status(500).json({ message: 'Error interno del servidor' });
+  }
+};
+
+module.exports = { register, login, me, createAgent, listAgents };

@@ -15,13 +15,17 @@
 'use strict';
 
 const { Router } = require('express');
-const { register, login, me } = require('../controllers/authController');
-const { authenticate } = require('../middleware/auth');
+const { register, login, me, createAgent, listAgents } = require('../controllers/authController');
+const { authenticate, requireRole } = require('../middleware/auth');
 
 const router = Router();
 
 router.post('/register', register);
 router.post('/login',    login);
 router.get('/me',        authenticate, me);
+
+// Gestión de agentes de reacción — solo SUPER_ADMIN
+router.post('/agents', authenticate, requireRole('SUPER_ADMIN'), createAgent);
+router.get('/agents',  authenticate, requireRole('SUPER_ADMIN'), listAgents);
 
 module.exports = router;

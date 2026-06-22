@@ -55,9 +55,11 @@ const weatherRoutes           = require('./routes/weather');          // Rutas R
 const driveRoutes             = require('./routes/drive');             // Rutas REST conducción — métricas MPU6050
 const crimeRoutes             = require('./routes/crime');             // Rutas REST criminalidad — hurtos motos/autos por localidad
 const geofenceRoutes          = require('./routes/geofence');           // Rutas REST geocercas de estacionamiento
+const incidentRoutes          = require('./routes/incident');            // Rutas REST incidentes comunitarios
 const { warmCache: warmCrimeCache } = require('./controllers/crimeController'); // Pre-carga ARI cache
 const { warmGeofenceCache } = require('./tcp/geofenceMonitor');                  // Pre-carga geocercas activas
 const { startTcpServer } = require('./tcp/tcpServer'); // Servidor TCP para ESP32
+const { setIo } = require('./services/socketService'); // Singleton io para controllers
 const { startWorker } = require('./tcp/queue');        // Worker que escribe batches a MongoDB
 
 // ─── 4. CREACIÓN DEL SERVIDOR HTTP + EXPRESS ──────────────────────────────────
@@ -93,6 +95,29 @@ const httpServer = http.createServer(app);
  */
 const io = new Server(httpServer, {
   cors: { origin: '*' },
+});
+
+// Registrar io en el singleton para que controllers REST puedan emitir
+setIo(io);
+
+// Cuando un agente de reacción conecta por socket.io, se une al room 'reaction'
+// para recibir 'incident:new' y 'incident:resolved' en tiempo real.
+// Los usuarios normales se unen al room de su deviceId (ya manejado en tcpServer).
+io.on('connection', (socket) => {
+  const role = socket.handshake.query?.role;
+  if (role === 'REACTION') {
+    socket.join('reaction');
+  }
+
+  // El cliente puede unirse al room de un incidente específico para recibir
+  // updates de GPS en tiempo real mientras persigue la moto.
+  socket.on('incident:join', (incidentId) => {
+    if (incidentId) socket.join(`incident:${incidentId}`);
+  });
+
+  socket.on('incident:leave', (incidentId) => {
+    if (incidentId) socket.leave(`incident:${incidentId}`);
+  });
 });
 
 // ─── 6. PUERTO HTTP ───────────────────────────────────────────────────────────
@@ -184,6 +209,7 @@ app.use('/api/weather',       weatherRoutes);
 app.use('/api/drive',         driveRoutes);
 app.use('/api/crime',         crimeRoutes);
 app.use('/api/geofence',      geofenceRoutes);
+app.use('/api/incidents',     incidentRoutes);
 
 // ─── 11. MANEJADOR 404 CATCH-ALL ──────────────────────────────────────────────
 // En Express 5 los middlewares de error deben registrarse después de todas

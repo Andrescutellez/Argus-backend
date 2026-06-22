@@ -151,4 +151,18 @@ async function getAllUsersWithDevices() {
   return Array.from(map.values());
 }
 
-module.exports = { findByEmail, findById, createUser, addDevice, getDevices, getDeviceOwner, getAllUsersWithDevices };
+/**
+ * @brief Retorna todos los usuarios con un rol específico.
+ *        Usado para listar agentes de reacción en el panel de super admin.
+ * @param {string} role  p.ej. 'REACTION'
+ * @returns {Promise<Array<{ id, email, role, created_at }>>}
+ */
+async function findAllByRole(role) {
+  const { rows } = await getPool().query(
+    'SELECT id, email, role, created_at FROM users WHERE role = $1 ORDER BY created_at DESC',
+    [role],
+  );
+  return rows;
+}
+
+module.exports = { findByEmail, findById, createUser, addDevice, getDevices, getDeviceOwner, getAllUsersWithDevices, findAllByRole };
