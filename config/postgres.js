@@ -64,9 +64,46 @@ async function initPostgres() {
       email         VARCHAR(255) UNIQUE NOT NULL,
       password_hash VARCHAR(255) NOT NULL,
       role          VARCHAR(20)  NOT NULL DEFAULT 'USER'
-                    CHECK (role IN ('USER', 'ADMIN', 'SUPER_ADMIN')),
+                    CHECK (role IN ('USER', 'ADMIN', 'SUPER_ADMIN', 'REACTION')),
       created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
     )
+  `);
+
+  // Migración: ampliar el CHECK de role para incluir 'REACTION'.
+  // Se ejecuta en cada arranque — los DO $$ son idempotentes (IF NOT EXISTS en el nombre).
+  await pool.query(`
+    DO $$
+    BEGIN
+      -- Eliminar constraint viejo si existe (cualquiera que aplique sobre la columna role)
+      IF EXISTS (
+        SELECT 1 FROM information_schema.table_constraints tc
+        JOIN information_schema.constraint_column_usage ccu
+          ON tc.constraint_name = ccu.constraint_name
+        WHERE tc.table_name = 'users'
+          AND tc.constraint_type = 'CHECK'
+          AND ccu.column_name = 'role'
+      ) THEN
+        EXECUTE (
+          SELECT 'ALTER TABLE users DROP CONSTRAINT ' || tc.constraint_name
+          FROM information_schema.table_constraints tc
+          JOIN information_schema.constraint_column_usage ccu
+            ON tc.constraint_name = ccu.constraint_name
+          WHERE tc.table_name = 'users'
+            AND tc.constraint_type = 'CHECK'
+            AND ccu.column_name = 'role'
+          LIMIT 1
+        );
+      END IF;
+      -- Agregar constraint actualizado con REACTION incluido
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE table_name = 'users' AND constraint_name = 'users_role_check_v2'
+      ) THEN
+        ALTER TABLE users
+          ADD CONSTRAINT users_role_check_v2
+          CHECK (role IN ('USER', 'ADMIN', 'SUPER_ADMIN', 'REACTION'));
+      END IF;
+    END $$
   `);
 
   // user_devices vincula un usuario con los deviceIds ESP32 que le pertenecen.
