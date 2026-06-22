@@ -21,6 +21,7 @@ const { createGeofence, deactivateGeofence, getActiveGeofence } = require('../mo
 const { setGeofenceCache, clearGeofenceCache } = require('../tcp/geofenceMonitor');
 const { sendCommand } = require('../tcp/tcpServer');
 const Gps = require('../models/Gps');
+const Alert = require('../models/Alert');
 
 /**
  * @brief Crea geocerca + arma el device en modo silencioso.
@@ -61,10 +62,25 @@ const createGeofenceHandler = async (req, res) => {
     // Actualizar cache en memoria para que checkGeofence() evalúe sin query.
     setGeofenceCache(deviceId, { id: geo.id, lat: latN, lng: lngN, radius_m: radius });
 
-    // Armar el device primero, luego activar park mode.
-    // El orden importa: en la cola FIFO del ESP32, ARM se procesa antes que PARK_MODE_ON.
     sendCommand(deviceId, 'ARM');
     sendCommand(deviceId, 'PARK_MODE_ON');
+
+    // Registrar en historial quién activó el modo parqueadero y con qué radio.
+    Alert.create({
+      deviceId,
+      type:      'GEOFENCE_ARM',
+      source:    'command',
+      actor: req.user ? {
+        userId:    req.user.sub,
+        userEmail: req.user.email,
+        role:      req.user.role,
+        platform:  req.body?.platform ?? null,
+      } : undefined,
+      meta:      { geofenceRadius: radius },
+      lat:       latN,
+      lon:       lngN,
+      timestamp: new Date(),
+    }).catch(() => {});
 
     return res.status(201).json({
       id: geo.id,

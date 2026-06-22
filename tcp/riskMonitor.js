@@ -4,10 +4,12 @@
  * PROPÓSITO:
  *   Monitorea en tiempo real si el dispositivo ESP32 entra o sale de una zona
  *   de alto riesgo usando el Argus Risk Index (ARI). Cuando ARI cruza el umbral
- *   ENTER (≥ 65), ejecuta automáticamente:
- *     1. Aumenta la sensibilidad del MPU6050 → SENSITIVITY_HIGH (mayor detección).
- *     2. Emite evento socket.io 'risk:zone_enter' → notificación push en app y web.
- *   Cuando el ARI baja del umbral EXIT (< 35), restaura sensibilidad normal.
+ *   ENTER (≥ 65), emite 'risk:zone_enter' vía socket.io → notificación push en
+ *   app y web. Cuando cae del umbral EXIT (< 35), emite 'risk:zone_exit'.
+ *
+ *   El ajuste automático de sensibilidad (SENSITIVITY_HIGH) fue eliminado:
+ *   el usuario controla la sensibilidad manualmente desde la pantalla de Seguridad,
+ *   con opción "Auto-sensibilidad en zonas de riesgo" que él puede activar.
  *
  * HISTÉRESIS:
  *   El gap entre ENTER (65) y EXIT (35) evita "flapping": si la moto está
@@ -22,7 +24,7 @@
  * DEPENDENCIAS:
  *   - ../controllers/crimeController: calculateARI, getBogotaCacheSync, pointInGeoJsonGeom
  *   - ./logger: log estructurado JSON
- *   - Socket.io (io) y cmdCallback: inyectados como parámetros para evitar dependencia circular.
+ *   - Socket.io (io): inyectado como parámetro para evitar dependencia circular.
  *
  * VARIABLES CRÍTICAS:
  *   - deviceRiskState: estado de riesgo actual por dispositivo. Volátil (RAM).
@@ -36,6 +38,7 @@
 
 const { log }                                                  = require('./logger');
 const { calculateARI, getBogotaCacheSync, pointInGeoJsonGeom } = require('../controllers/crimeController');
+const Alert                                                    = require('../models/Alert');
 
 // ─── UMBRALES ARI ─────────────────────────────────────────────────────────────
 
@@ -68,7 +71,7 @@ const ALERT_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutos
  *
  * RIESGO: volátil — se pierde en reinicios del servidor. Aceptable porque:
  *   - Al reconectar, el primer paquete GPS recalcula el ARI y restaura el estado.
- *   - El dispositivo recibe SENSITIVITY_HIGH de nuevo si sigue en zona de riesgo.
+ *   - El primer GPS tick post-reinicio recalcula el ARI y restaura el estado de zona.
  */
 const deviceRiskState = new Map();
 
@@ -89,24 +92,21 @@ const deviceRiskState = new Map();
  *      Si fuera de Bogotá → retornar (ARI solo cubre Bogotá por ahora).
  *   3. calculateARI() con hora actual → score 0-100 dinámico.
  *   4. Comparar con estado anterior (deviceRiskState):
- *      a) Si ARI cruzó hacia arriba (≥ ENTER): encolar SENSITIVITY_HIGH + emitir risk:zone_enter.
- *      b) Si ARI cruzó hacia abajo (< EXIT): encolar SENSITIVITY_MEDIUM + emitir risk:zone_exit.
+ *      a) Si ARI cruzó hacia arriba (≥ ENTER): emitir risk:zone_enter.
+ *      b) Si ARI cruzó hacia abajo (< EXIT): emitir risk:zone_exit.
  *      c) Si no hay cruce: solo actualizar estado en el Map.
  *
  * DEPENDENCIAS:
  *   - getBogotaCacheSync(): acceso síncrono al cache de crimen (sin HTTP).
  *   - calculateARI(): fórmula ARI con hora actual (dinámica).
  *   - pointInGeoJsonGeom(): ray casting punto-en-polígono.
- *   - cmdCallback: callback para encolar comando en tcpServer.commandQueues.
  *   - io: Socket.io Server para emitir al frontend.
  *
  * @param {string}   deviceId    ID del dispositivo (ej: "ARGUS-1237E630").
  * @param {number}   lat         Latitud WGS-84.
  * @param {number}   lon         Longitud WGS-84.
  * @param {object|null} io       Instancia Socket.io. null en tests.
- * @param {function(string, string): void} cmdCallback
- *   Callback para encolar un comando: cmdCallback(deviceId, 'SENSITIVITY_HIGH').
- *   Inyectado desde tcpServer para evitar dependencia circular.
+ * @param {function} cmdCallback Ignorado — mantenido por compatibilidad con el caller en tcpServer.js.
  *
  * @returns {Promise<void>}
  *
@@ -152,8 +152,16 @@ async function checkRiskZone(deviceId, lat, lon, io, cmdCallback) {
   if (!wasHigh && nowHigh) {
     log('info', 'risk.zone_enter', { deviceId, localidad: props.nombre, ari, risk_level: props.risk_level, notified: cooldownOk });
 
-    // El ajuste de sensibilidad ocurre siempre — independiente del cooldown.
-    if (cmdCallback) cmdCallback(deviceId, 'SENSITIVITY_HIGH');
+    Alert.create({
+      deviceId,
+      type:      'RISK_ZONE_ENTER',
+      source:    'system',
+      actor:     { platform: 'system' },
+      meta:      { ari, localidad: props.nombre },
+      lat,
+      lon,
+      timestamp: new Date(),
+    }).catch(() => {});
 
     // La notificación push respeta el cooldown: máximo 1 alerta cada 5 minutos.
     // Esto evita spamear al usuario si atraviesa varias localidades de alto riesgo seguidas.
@@ -177,7 +185,16 @@ async function checkRiskZone(deviceId, lat, lon, io, cmdCallback) {
   else if (wasHigh && nowSafe) {
     log('info', 'risk.zone_exit', { deviceId, localidad: props.nombre, ari, notified: cooldownOk });
 
-    if (cmdCallback) cmdCallback(deviceId, 'SENSITIVITY_MEDIUM');
+    Alert.create({
+      deviceId,
+      type:      'RISK_ZONE_EXIT',
+      source:    'system',
+      actor:     { platform: 'system' },
+      meta:      { ari, localidad: props.nombre },
+      lat,
+      lon,
+      timestamp: new Date(),
+    }).catch(() => {});
 
     if (cooldownOk) {
       deviceRiskState.set(deviceId, { ...deviceRiskState.get(deviceId), lastAlertTs: Date.now() });
@@ -218,22 +235,21 @@ module.exports = { checkRiskZone, getDeviceRisk };
    EXPLICACIÓN PARA HUMANO:
    Este módulo es el "guardián de zona" de Argus. Cada vez que la moto envía
    su posición GPS, este módulo consulta en memoria si esa ubicación está en
-   una zona peligrosa (según los datos de hurtos OAIEE). Si la moto acaba de
-   entrar a una zona peligrosa, automáticamente le dice al ESP32 que sea más
-   sensible al movimiento (como si activaras el modo alerta máxima sin que el
-   usuario tenga que hacer nada). Y le avisa al teléfono del usuario.
+   una zona peligrosa (según los datos de hurtos OAIEE). Emite un evento
+   socket.io al teléfono del usuario. Si el usuario tiene activa la opción
+   "Auto-sensibilidad en zonas de riesgo" en la app, la app sube la
+   sensibilidad del sensor al ESP32 automáticamente.
 
    PSEUDOCÓDIGO:
-   checkRiskZone(deviceId, lat, lon, io, cmdCallback):
+   checkRiskZone(deviceId, lat, lon, io):
      cache = getBogotaCacheSync()        → 20 polígonos en RAM
      localidad = ray_casting(lat, lon)   → O(20)
      ari = calculateARI(localidad.props) → 0-100 dinámico con hora actual
      prev = deviceRiskState[deviceId]
      if !prev.inHighRisk AND ari >= 65:
-       cmdCallback(deviceId, 'SENSITIVITY_HIGH')
-       io.emit('risk:zone_enter', {...})
+       io.emit('risk:zone_enter', {...})   → app/web muestra banner
+       // La app sube sensibilidad si el toggle del usuario está ON
      elif prev.inHighRisk AND ari < 35:
-       cmdCallback(deviceId, 'SENSITIVITY_MEDIUM')
        io.emit('risk:zone_exit', {...})
      deviceRiskState[deviceId] = { ..., ari, inHighRisk }
 
@@ -242,7 +258,7 @@ module.exports = { checkRiskZone, getDeviceRisk };
                                                               ↓
                                                ARI cruzó umbral?
                                              NO ↙             ↘ SÍ
-                                      actualizar        cmdCallback → SENSITIVITY_HIGH
-                                      estado solo       io.emit → risk:zone_enter
+                                      actualizar        io.emit → risk:zone_enter
+                                      estado solo       app (toggle ON) → SENSITIVITY_HIGH
 
    ═══════════════════════════════════════════════════════════ */

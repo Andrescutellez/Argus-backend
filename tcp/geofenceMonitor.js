@@ -30,6 +30,7 @@
 
 const { log } = require('./logger');
 const { getAllActiveGeofences, deactivateGeofence } = require('../models/ParkingGeofence');
+const Alert = require('../models/Alert');
 
 const EXIT_THRESHOLD = 2;  // puntos GPS consecutivos fuera del radio → salida confirmada
 
@@ -152,15 +153,27 @@ async function checkGeofence(deviceId, lat, lng, io, cmdCallback) {
     log('error', 'geofence.deactivate.error', { deviceId, err: err.message }),
   );
 
-  // Ordenar al ESP32 que active la alarma completa.
   cmdCallback(deviceId, 'PARK_MODE_OFF');
 
-  // Notificar al frontend para que muestre alerta urgente.
+  const exitTs = new Date();
+
+  // Persistir el evento en el historial de auditoría.
+  Alert.create({
+    deviceId,
+    type:      'GEOFENCE_EXIT',
+    source:    'system',
+    actor:     { platform: 'system' },
+    meta:      { geofenceRadius: geo.radius_m },
+    lat,
+    lon:       lng,
+    timestamp: exitTs,
+  }).catch((err) => log('error', 'geofence.alert.error', { deviceId, err: err.message }));
+
   if (io) {
     io.emit('geofence:exit', {
       deviceId,
       dist: Math.round(dist),
-      timestamp: new Date().toISOString(),
+      timestamp: exitTs.toISOString(),
     });
   }
 }

@@ -168,15 +168,42 @@ const getDeviceStatus = async (req, res) => {
  * @param {string} command — uno de VALID_COMMANDS
  * @returns {Promise<void>}
  */
-async function saveCommandAlert(deviceId, command) {
-  // Normalizar tipo para evitar colisión con los tipos de estado del device.
-  const alertType = command === 'SIREN_ON' ? 'SIREN_ON_CMD' : command;
+/**
+ * Mapa de niveles de sensibilidad para guardar en meta.
+ * @type {Record<string, {level: number, label: string}>}
+ */
+const SENSITIVITY_META = {
+  SENSITIVITY_VERY_LOW:  { level: 0, label: 'Muy baja' },
+  SENSITIVITY_LOW:       { level: 1, label: 'Baja'     },
+  SENSITIVITY_MEDIUM:    { level: 2, label: 'Media'    },
+  SENSITIVITY_HIGH:      { level: 3, label: 'Alta'     },
+  SENSITIVITY_VERY_HIGH: { level: 4, label: 'Muy alta' },
+};
+
+/**
+ * @brief Persiste un comando enviado como alerta de auditoría y actualiza DeviceState.
+ *
+ * @param {string} deviceId
+ * @param {string} command           — uno de VALID_COMMANDS
+ * @param {object|null} actor        — { userId, userEmail, role, platform }
+ * @param {object|null} extraMeta    — campos adicionales de contexto (ari, etc.)
+ */
+async function saveCommandAlert(deviceId, command, actor = null, extraMeta = null) {
+  // Los comandos SENSITIVITY_* se unifican en un solo tipo con nivel en meta.
+  const isSensitivity = command in SENSITIVITY_META;
+  const alertType = isSensitivity ? 'SENSITIVITY_CHANGE' : command;
+
+  const meta = isSensitivity
+    ? { ...SENSITIVITY_META[command], ...extraMeta }
+    : (extraMeta ?? undefined);
 
   const alert = await Alert.create({
     deviceId,
     type: alertType,
     source: 'command',
-    lat: null,  // Los comandos no tienen coordenadas asociadas
+    actor: actor ?? undefined,
+    meta: meta ?? undefined,
+    lat: null,
     lon: null,
     timestamp: new Date(),
   });
@@ -275,11 +302,16 @@ const postCommand = (req, res) => {
   // Retorna false si el deviceId es desconocido (nunca se conectó a este servidor).
   const delivered = sendCommand(deviceId, command);
 
-  // Persistir el comando como alerta de tipo 'command' y actualizar DeviceState
-  // si el comando es ARM o DISARM. Fire-and-forget: no bloqueamos la respuesta
-  // HTTP esperando a MongoDB. Si la escritura falla, el ESP32 ya tiene el comando
-  // y lo ejecutará; solo se pierde el registro de auditoría (aceptable por ahora).
-  saveCommandAlert(deviceId, command).catch(() => {});
+  // Construir el actor desde el JWT: quién envió el comando, desde qué plataforma.
+  // req.body.platform es opcional — el frontend puede informar 'app' o 'web'.
+  const actor = req.user ? {
+    userId:    req.user.sub,
+    userEmail: req.user.email,
+    role:      req.user.role,
+    platform:  req.body.platform ?? null,
+  } : null;
+
+  saveCommandAlert(deviceId, command, actor).catch(() => {});
 
   if (delivered) {
     return res.status(200).json({ message: 'Comando enviado', delivered: true });

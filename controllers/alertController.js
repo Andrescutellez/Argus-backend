@@ -135,21 +135,39 @@ const getAlerts = async (req, res) => {
 const acknowledgeAlert = async (req, res) => {
   const { alertId } = req.params;
 
+  const by = req.user ? {
+    userId:    req.user.sub,
+    userEmail: req.user.email,
+    role:      req.user.role,
+    platform:  req.body?.platform ?? null,
+  } : null;
+
+  const now = new Date();
+
   try {
     const alert = await Alert.findByIdAndUpdate(
       alertId,
-      // $set implícito en findByIdAndUpdate cuando se pasa un objeto plano.
-      // acknowledgedAt registra el momento exacto de la revisión para auditoría.
-      { acknowledged: true, acknowledgedAt: new Date() },
-      { new: true }, // Retorna el doc DESPUÉS del update, no antes.
+      {
+        acknowledged:   true,
+        acknowledgedAt: now,
+        acknowledgedBy: by ?? undefined,
+      },
+      { new: true },
     );
 
-    // findByIdAndUpdate retorna null si no encontró un doc con ese _id.
-    // Esto puede ocurrir si el alertId es un ObjectId sintácticamente válido
-    // pero no existe en la colección (alerta eliminada o ID incorrecto).
     if (!alert) {
       return res.status(404).json({ message: 'Alerta no encontrada' });
     }
+
+    // Registrar en el historial quién silenció qué alerta.
+    Alert.create({
+      deviceId:  alert.deviceId,
+      type:      'ALERT_ACKNOWLEDGED',
+      source:    'command',
+      actor:     by ?? undefined,
+      meta:      { refAlertId: alertId },
+      timestamp: now,
+    }).catch(() => {});
 
     return res.status(200).json(alert);
   } catch (err) {
