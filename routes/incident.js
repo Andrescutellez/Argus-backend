@@ -23,6 +23,7 @@ const {
   joinPursuit,
   leavePursuit,
   resolveIncident,
+  resolveIncidentByDevice,
 } = require('../controllers/incidentController');
 
 const router = Router();
@@ -52,7 +53,16 @@ router.post('/:id/pursue', authenticate, joinPursuit);
 // Salir de persecución
 router.delete('/:id/pursue', authenticate, leavePursuit);
 
-// Cerrar incidente
+// Cerrar incidente por deviceId — DEBE ir antes de /:id/resolve o Express lo trataría
+// como { id: 'device' } y nunca llegaría al handler correcto.
+router.patch(
+  '/device/:deviceId/resolve',
+  authenticate,
+  requireRole('USER', 'ADMIN', 'SUPER_ADMIN'),
+  resolveIncidentByDevice,
+);
+
+// Cerrar incidente por ID
 router.patch(
   '/:id/resolve',
   authenticate,

@@ -56,6 +56,8 @@ const driveRoutes             = require('./routes/drive');             // Rutas 
 const crimeRoutes             = require('./routes/crime');             // Rutas REST criminalidad — hurtos motos/autos por localidad
 const geofenceRoutes          = require('./routes/geofence');           // Rutas REST geocercas de estacionamiento
 const incidentRoutes          = require('./routes/incident');            // Rutas REST incidentes comunitarios
+const secureRoomRoutes        = require('./routes/secureRoom');          // Rutas REST sala de recuperación Argus Secure
+const { initGeoStream }       = require('./services/geoStreamService'); // WebSocket GPS para Argus Secure
 const { warmCache: warmCrimeCache } = require('./controllers/crimeController'); // Pre-carga ARI cache
 const { warmGeofenceCache } = require('./tcp/geofenceMonitor');                  // Pre-carga geocercas activas
 const { startTcpServer } = require('./tcp/tcpServer'); // Servidor TCP para ESP32
@@ -146,6 +148,12 @@ startWorker();
 // directamente cuando recibe un paquete GPS válido del ESP32.
 startTcpServer(io);
 
+// Monta el WebSocket de geo-stream para Argus Secure en ws://<host>/geo.
+// Comparte el mismo httpServer (y por lo tanto el mismo puerto que la API REST).
+// Debe inicializarse DESPUÉS de que httpServer existe pero ANTES de que
+// httpServer.listen() sea llamado, para que capture el evento 'upgrade'.
+initGeoStream(httpServer);
+
 // Pre-carga el cache de criminalidad para que riskMonitor.js pueda calcular
 // ARI desde el primer paquete GPS, sin esperar a que alguien abra la web.
 // El delay de 8s da margen para que MongoDB y la conexión a OAIEE estén listos.
@@ -210,6 +218,7 @@ app.use('/api/drive',         driveRoutes);
 app.use('/api/crime',         crimeRoutes);
 app.use('/api/geofence',      geofenceRoutes);
 app.use('/api/incidents',     incidentRoutes);
+app.use('/api/secure/rooms', secureRoomRoutes);
 
 // ─── 11. MANEJADOR 404 CATCH-ALL ──────────────────────────────────────────────
 // En Express 5 los middlewares de error deben registrarse después de todas

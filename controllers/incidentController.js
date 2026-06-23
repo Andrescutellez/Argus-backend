@@ -304,10 +304,11 @@ const resolveIncident = async (req, res) => {
     // Solo el dueño que reportó o un ADMIN/SUPER_ADMIN pueden cerrar
     const role   = req.user?.role;
     const userId = req.user?.sub;
-    const isOwner  = incident.reportedBy?.userId === userId;
-    const isAdmin  = role === 'ADMIN' || role === 'SUPER_ADMIN';
-    if (!isOwner && !isAdmin) {
-      return res.status(403).json({ message: 'Solo el dueño o un admin pueden cerrar el incidente' });
+    const isOwner    = incident.reportedBy?.userId === userId;
+    const isAdmin    = role === 'ADMIN' || role === 'SUPER_ADMIN';
+    const isReaction = role === 'REACTION';
+    if (!isOwner && !isAdmin && !isReaction) {
+      return res.status(403).json({ message: 'Solo el dueño, un agente o un admin pueden cerrar el incidente' });
     }
 
     incident.status         = status;
@@ -332,6 +333,48 @@ const resolveIncident = async (req, res) => {
   }
 };
 
+/**
+ * @brief Cierra el incidente activo de un dispositivo específico.
+ *        Usado cuando el dueño restaura el motor (ENGINE_RESTORE) desde la app:
+ *        la moto fue recuperada, el incidente comunitario debe cerrarse automáticamente.
+ *
+ * PATCH /api/incidents/device/:deviceId/resolve
+ * Body: { resolutionNote? }
+ */
+const resolveIncidentByDevice = async (req, res) => {
+  const { deviceId } = req.params;
+  const { resolutionNote } = req.body ?? {};
+
+  try {
+    const incident = await Incident.findOne({ deviceId, status: 'active' });
+    if (!incident) {
+      // Ningún incidente activo → OK silencioso (el cliente no necesita saber)
+      return res.status(200).json({ message: 'Sin incidente activo para este dispositivo' });
+    }
+
+    incident.status         = 'resolved';
+    incident.resolvedAt     = new Date();
+    incident.resolvedBy     = buildActor(req.user);
+    incident.resolutionNote = resolutionNote ?? 'Motor restaurado — moto recuperada';
+    await incident.save();
+
+    const io = getIo();
+    if (io) {
+      io.to('reaction').emit('incident:resolved', {
+        incidentId: incident._id.toString(),
+        status:     'resolved',
+        resolvedAt: incident.resolvedAt.toISOString(),
+      });
+    }
+
+    log('info', 'incident.resolved_by_device', { deviceId, incidentId: incident._id });
+    return res.status(200).json(incident);
+  } catch (err) {
+    log('error', 'incident.resolveByDevice.error', { err: err.message });
+    return res.status(500).json({ message: 'Error interno del servidor' });
+  }
+};
+
 module.exports = {
   createIncident,
   getActiveIncidents,
@@ -339,4 +382,5 @@ module.exports = {
   joinPursuit,
   leavePursuit,
   resolveIncident,
+  resolveIncidentByDevice,
 };
