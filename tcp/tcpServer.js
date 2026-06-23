@@ -84,6 +84,19 @@ const RATE_LIMIT_MS = 5_000;
 const connectedDevices = new Map();
 
 /**
+ * Último comando enviado por flushCommands() pero aún no confirmado por el device.
+ *
+ * @type {Map<string, string>} — Map<deviceId, comando>
+ *
+ * PROPÓSITO: cuando flushCommands() hace q.shift() + socket.write(), el comando
+ * se pierde si el socket muere antes de que el device lo reciba. Este Map retiene
+ * el comando hasta que el device envía su próximo paquete (confirma implícitamente
+ * que el socket estaba vivo). En el evento 'close', si el deviceId tiene entrada
+ * aquí, el comando se re-inserta al frente de commandQueues para reintento.
+ */
+const lastSentCommands = new Map();
+
+/**
  * Cola de comandos pendientes por device, indexada por deviceId.
  *
  * @type {Map<string, string[]>}
@@ -214,6 +227,11 @@ function flushCommands(socket, deviceId) {
   // Solo se envía UN comando por paquete recibido para no saturar el
   // buffer del ESP32 (que es limitado en RAM).
   const cmd = q.shift();
+
+  // Guardar en lastSentCommands ANTES de escribir al socket.
+  // Si el socket muere antes de que el device confirme recepción (próximo paquete),
+  // el handler 'close' re-insertará este comando al frente de la cola.
+  lastSentCommands.set(deviceId, cmd);
 
   // El formato CMD|accion\n es el protocolo Argus para comandos.
   // El ESP32 espera este prefijo para distinguir un comando de un ACK.
@@ -655,6 +673,7 @@ function createTcpServer(io) {
 
           log('info', 'tcp.event.accepted', { deviceId, type: event.type });
           socket.write('ACK\r\n');
+          lastSentCommands.delete(deviceId);
           flushCommands(socket, deviceId);
           continue; // No procesar este línea como frame GPS
         }
@@ -725,6 +744,7 @@ function createTcpServer(io) {
             softCount:    drive.softCount,
           });
           socket.write('ACK\r\n');
+          lastSentCommands.delete(deviceId);
           flushCommands(socket, deviceId);
           continue;
         }
@@ -824,6 +844,11 @@ function createTcpServer(io) {
           log('info', 'tcp.auth.ok', { deviceId, remote });
         }
 
+        // Confirmar que el último comando enviado llegó: el device está vivo y respondiendo.
+        // El device envía paquetes periódicos — si llegó este, el socket era funcional
+        // cuando se envió el último CMD. Limpiar el "unconfirmed" evita re-envíos innecesarios.
+        lastSentCommands.delete(deviceId);
+
         // ── PASO 6: Validación de coordenadas geográficas ─────────────────
         // Aunque parseFloat ya corrió en parsePacket(), aquí validamos rangos.
         // Un GPS con fix inválido puede enviar 0.0/0.0 o valores fuera de rango.
@@ -847,6 +872,7 @@ function createTcpServer(io) {
         // y despachamos comandos pendientes (ARM/DISARM siguen funcionando).
         if (packet.timestamp === '0') {
           socket.write('ACK\r\n');
+          lastSentCommands.delete(deviceId);
           flushCommands(socket, deviceId);
           continue;
         }
@@ -903,6 +929,7 @@ function createTcpServer(io) {
         // El ESP32 espera este ACK antes de apagar el módulo de radio para
         // ahorrar batería. Sin el ACK, el ESP32 reintentaría (lógica en firmware).
         socket.write('ACK\r\n');
+        lastSentCommands.delete(deviceId);
         log('info', 'tcp.packet.accepted', { deviceId, lat, lng });
 
         // ── PASO 11: Despacho de comandos pendientes ──────────────────────
@@ -929,7 +956,23 @@ function createTcpServer(io) {
     // NO limpiar commandQueues aquí: si el device se reconecta pronto,
     // los comandos pendientes deben persistir para ser entregados.
     socket.on('close', () => {
-      if (deviceId) connectedDevices.delete(deviceId);
+      if (deviceId) {
+        connectedDevices.delete(deviceId);
+
+        // Si hay un comando enviado pero no confirmado (el device no respondió
+        // antes del cierre), reinsertar al frente de la cola para reintento.
+        // Esto cubre el caso de socket zombie: flushCommands hizo shift()+write()
+        // pero el socket moría silenciosamente antes de que el device leyera el CMD.
+        const unconfirmed = lastSentCommands.get(deviceId);
+        if (unconfirmed) {
+          const q = commandQueues.get(deviceId);
+          if (q) {
+            q.unshift(unconfirmed);
+            log('warn', 'tcp.cmd.requeued', { deviceId, cmd: unconfirmed });
+          }
+          lastSentCommands.delete(deviceId);
+        }
+      }
       log('info', 'tcp.disconnect', { remote, deviceId });
     });
 
