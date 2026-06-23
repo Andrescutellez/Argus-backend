@@ -72,6 +72,12 @@ const { startWorker } = require('./tcp/queue');        // Worker que escribe bat
 const app = express();
 const httpServer = http.createServer(app);
 
+// ⚠️ initGeoStream DEBE registrar su listener 'upgrade' ANTES que socket.io.
+// engine.io v6 intercepta y destruye TODOS los upgrades que no sean /socket.io/,
+// por lo que si socket.io se inicializa primero, los upgrades a /geo llegan con
+// 400 Bad Request antes de que geoStreamService pueda manejarlos.
+initGeoStream(httpServer);
+
 // ─── 5. SOCKET.IO ─────────────────────────────────────────────────────────────
 /**
  * Instancia global de Socket.io compartida con el servidor TCP.
@@ -147,12 +153,6 @@ startWorker();
 // Le pasamos io para que el servidor TCP pueda emitir eventos WebSocket
 // directamente cuando recibe un paquete GPS válido del ESP32.
 startTcpServer(io);
-
-// Monta el WebSocket de geo-stream para Argus Secure en ws://<host>/geo.
-// Comparte el mismo httpServer (y por lo tanto el mismo puerto que la API REST).
-// Debe inicializarse DESPUÉS de que httpServer existe pero ANTES de que
-// httpServer.listen() sea llamado, para que capture el evento 'upgrade'.
-initGeoStream(httpServer);
 
 // Pre-carga el cache de criminalidad para que riskMonitor.js pueda calcular
 // ARI desde el primer paquete GPS, sin esperar a que alguien abra la web.
