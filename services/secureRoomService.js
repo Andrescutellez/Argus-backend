@@ -154,7 +154,31 @@ function generateGeoToken(userId, roomName, role) {
 async function createRoom(vehicleId, owner, lastKnownPosition = null) {
   const existing = await RecoveryRoom.findOne({ vehicleId, status: 'ACTIVE' });
   if (existing) {
-    throw Object.assign(new Error('Ya existe una sala activa para este vehículo'), { statusCode: 409 });
+    // Sala ya abierta — devolver tokens frescos para reentrar sin 409
+    if (new Date() > existing.expiresAt) {
+      await RecoveryRoom.findByIdAndUpdate(existing._id, { status: 'EXPIRED', closedAt: new Date(), resolution: 'TIMEOUT' });
+    } else {
+      const alreadyIn = existing.participants.find(p => p.userId === owner.userId);
+      if (!alreadyIn) {
+        existing.participants.push({ userId: owner.userId, userEmail: owner.email ?? null, role: 'OWNER' });
+        await existing.save();
+      }
+      const [livekitToken, geoToken] = await Promise.all([
+        generateLivekitToken(owner.userId, existing.livekitRoomName, 'OWNER'),
+        generateGeoToken(owner.userId, existing.livekitRoomName, 'OWNER'),
+      ]);
+      return {
+        roomId:       existing._id,
+        roomName:     existing.livekitRoomName,
+        livekitUrl:   process.env.LIVEKIT_WS_URL || 'ws://localhost:7880',
+        livekitToken,
+        geoWsUrl:     process.env.GEO_STREAM_WS_URL || `ws://localhost:${process.env.PORT || 3000}/geo`,
+        geoToken,
+        expiresAt:    existing.expiresAt.toISOString(),
+        mockMode:     MOCK_MODE,
+        rejoined:     true,
+      };
+    }
   }
 
   const roomName = buildRoomName(vehicleId);
