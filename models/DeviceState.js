@@ -65,7 +65,7 @@ const DeviceStateSchema = new Schema(
      * Valores válidos: 'STATE_IDLE', 'STATE_MOVING', 'STATE_ALERT', 'STATE_PURSUIT'.
      * Se actualiza por tcpServer.js al recibir frames EVENT del device,
      * y de forma optimista por deviceController al enviar PURSUIT_CONFIRM.
-     * STATE_PURSUIT implica alarma de persecución activa (sirena + motor cortado).
+     * STATE_PURSUIT implica GPS continuo cada 10s. Sirena y corte de motor son comandos explícitos.
      */
     state: {
       type: String,

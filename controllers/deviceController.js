@@ -61,7 +61,7 @@ const VALID_COMMANDS = [
   'SIREN_OFF',        // Bocina de búsqueda: buzzer OFF sin cambiar estado
   'ENGINE_CUT',       // Corte de motor preventivo/silencioso — sin cambio de estado
   'ENGINE_RESTORE',   // Restaurar motor → STATE_IDLE (motor libre)
-  'PURSUIT_CONFIRM',  // Robo confirmado → STATE_PURSUIT → sirena + motor cortado
+  'PURSUIT_CONFIRM',  // Robo confirmado → STATE_PURSUIT → GPS cada 10s (sin sirena ni corte de motor)
   'SENSITIVITY_VERY_LOW',
   'SENSITIVITY_LOW',
   'SENSITIVITY_MEDIUM',
@@ -215,7 +215,7 @@ async function saveCommandAlert(deviceId, command, actor = null, extraMeta = nul
   if (command === 'DISARM')          { stateUpdate.armed = false; stateUpdate.state = 'STATE_IDLE'; stateUpdate.motorCut = false; }
   if (command === 'ENGINE_CUT')      stateUpdate.motorCut = true;   // corte preventivo — state permanece sin cambio
   if (command === 'ENGINE_RESTORE')  stateUpdate.motorCut = false;
-  if (command === 'PURSUIT_CONFIRM') { stateUpdate.state = 'STATE_PURSUIT'; stateUpdate.motorCut = true; }
+  if (command === 'PURSUIT_CONFIRM') { stateUpdate.state = 'STATE_PURSUIT'; }  // motor/sirena NO se activan automáticamente (firmware June 23)
 
   if (Object.keys(stateUpdate).length > 0) {
     await DeviceState.findOneAndUpdate(
