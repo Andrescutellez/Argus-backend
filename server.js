@@ -57,6 +57,7 @@ const crimeRoutes             = require('./routes/crime');             // Rutas 
 const geofenceRoutes          = require('./routes/geofence');           // Rutas REST geocercas de estacionamiento
 const incidentRoutes          = require('./routes/incident');            // Rutas REST incidentes comunitarios
 const secureRoomRoutes        = require('./routes/secureRoom');          // Rutas REST sala de recuperación Argus Secure
+const settingsRoutes          = require('./routes/settings');             // Rutas REST configuración global
 const { initGeoStream }       = require('./services/geoStreamService'); // WebSocket GPS para Argus Secure
 const { warmCache: warmCrimeCache } = require('./controllers/crimeController'); // Pre-carga ARI cache
 const { warmGeofenceCache } = require('./tcp/geofenceMonitor');                  // Pre-carga geocercas activas
@@ -112,9 +113,17 @@ setIo(io);
 // para recibir 'incident:new' y 'incident:resolved' en tiempo real.
 // Los usuarios normales se unen al room de su deviceId (ya manejado en tcpServer).
 io.on('connection', (socket) => {
-  const role = socket.handshake.query?.role;
+  const role     = socket.handshake.query?.role;
+  const deviceId = socket.handshake.query?.deviceId;
+
   if (role === 'REACTION') {
     socket.join('reaction');
+  }
+
+  // Une el socket al room de su dispositivo para recibir eventos dirigidos:
+  // 'secure:room_alert' (sala de recuperación) e 'incident:nearby' (robo cercano).
+  if (deviceId) {
+    socket.join(`device:${deviceId}`);
   }
 
   // El cliente puede unirse al room de un incidente específico para recibir
@@ -219,6 +228,7 @@ app.use('/api/crime',         crimeRoutes);
 app.use('/api/geofence',      geofenceRoutes);
 app.use('/api/incidents',     incidentRoutes);
 app.use('/api/secure/rooms', secureRoomRoutes);
+app.use('/api/settings',     settingsRoutes);
 
 // ─── 11. MANEJADOR 404 CATCH-ALL ──────────────────────────────────────────────
 // En Express 5 los middlewares de error deben registrarse después de todas

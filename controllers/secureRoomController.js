@@ -18,8 +18,9 @@
 
 'use strict';
 
-const svc    = require('../services/secureRoomService');
-const { getIo } = require('../services/socketService');
+const svc                = require('../services/secureRoomService');
+const { getIo }          = require('../services/socketService');
+const { notifyNearbyRiders } = require('../services/nearbyAlertService');
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -65,15 +66,34 @@ const createRoom = async (req, res) => {
     const owner  = extractUser(req);
     const result = await svc.createRoom(vehicleId, owner, lastKnownPosition ?? null);
 
-    // Notificar a agentes REACTION via socket.io
     const io = getIo();
     if (io) {
-      io.to('reaction').emit('secure:room_opened', {
+      const eventPayload = {
         roomName:  result.roomName,
         vehicleId,
         ownerId:   owner.userId,
         createdAt: new Date().toISOString(),
+      };
+
+      // Notificar agentes de reacción en sala 'reaction'
+      io.to('reaction').emit('secure:room_opened', eventPayload);
+
+      // Notificar al dispositivo del propietario (Flutter app) para que muestre
+      // el acceso rápido a la sala. El socket del usuario se une al room
+      // 'device:<deviceId>' en la conexión (ver server.js io.on('connection')).
+      io.to(`device:${vehicleId}`).emit('secure:room_alert', {
+        roomName:  result.roomName,
+        vehicleId,
+        createdAt: eventPayload.createdAt,
       });
+    }
+
+    // Notificar a moteros Argus cercanos (fuego y olvida — no bloquea la respuesta)
+    const pos = lastKnownPosition;
+    if (pos?.lat != null && pos?.lng != null) {
+      notifyNearbyRiders(vehicleId, pos.lat, pos.lng, result.roomName).catch(
+        (err) => console.error('[SecureRoom] notifyNearbyRiders error:', err.message)
+      );
     }
 
     return res.status(201).json(result);

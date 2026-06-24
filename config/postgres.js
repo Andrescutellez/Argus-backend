@@ -220,7 +220,28 @@ async function initPostgres() {
     )
   `);
 
-  console.log('[PG] Schema listo (users, user_devices, motos, devices, subscriptions, audit_log, manufactured_devices, parking_geofences)');
+  /**
+   * system_settings — configuración global del sistema (clave-valor).
+   * Cada fila es un parámetro editable desde la Central de Monitoreo.
+   * Valores actuales:
+   *   nearby_alert_radius_km  — radio en km para notificar moteros cercanos (0 = desactivado)
+   */
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS system_settings (
+      key        VARCHAR(100) PRIMARY KEY,
+      value      TEXT         NOT NULL,
+      updated_at TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  // Valor por defecto: 5 km de radio para alertas cercanas
+  await pool.query(`
+    INSERT INTO system_settings (key, value)
+    VALUES ('nearby_alert_radius_km', '5')
+    ON CONFLICT (key) DO NOTHING
+  `);
+
+  console.log('[PG] Schema listo (users, user_devices, motos, devices, subscriptions, audit_log, manufactured_devices, parking_geofences, system_settings)');
 }
 
 /**
