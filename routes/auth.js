@@ -41,8 +41,8 @@ router.post('/fcm-token', authenticate, async (req, res) => {
     return res.status(400).json({ error: 'token requerido' });
   }
   try {
-    await saveFcmToken(req.user.id, token);
-    console.log(`[Push] token guardado userId=${req.user.id} token=${token.slice(0, 20)}...`);
+    await saveFcmToken(req.user.sub, token);
+    console.log(`[Push] token guardado userId=${req.user.sub} token=${token.slice(0, 20)}...`);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
