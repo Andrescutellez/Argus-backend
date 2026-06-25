@@ -42,6 +42,7 @@ router.post('/fcm-token', authenticate, async (req, res) => {
   }
   try {
     await saveFcmToken(req.user.id, token);
+    console.log(`[Push] token guardado userId=${req.user.id} token=${token.slice(0, 20)}...`);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

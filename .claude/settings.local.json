@@ -81,7 +81,8 @@
       "PowerShell(Start-Process \"http://localhost:5174/\")",
       "Bash(git check-ignore *)",
       "Bash(rm check_braces.py)",
-      "Bash(dart format *)"
+      "Bash(dart format *)",
+      "Bash(powershell -Command ' *)"
     ],
     "additionalDirectories": [
       "c:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\argus_app",
@@ -101,5 +102,4 @@
       "C:\\Users\\Leonardo\\Desktop\\Proyecto Argus"
     ]
   }
-  
 }
