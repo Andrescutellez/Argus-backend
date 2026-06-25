@@ -104,6 +104,35 @@ async function getDeviceOwner(deviceId) {
 }
 
 /**
+ * @brief Guarda o actualiza el token FCM de un usuario para push notifications.
+ * @param {string} userId  UUID del usuario
+ * @param {string} token   Token FCM del dispositivo
+ */
+async function saveFcmToken(userId, token) {
+  await getPool().query(
+    'UPDATE users SET fcm_token = $1 WHERE id = $2',
+    [token, userId],
+  );
+}
+
+/**
+ * @brief Retorna el fcm_token del dueño de un deviceId, o null si no tiene.
+ * @param {string} deviceId  p.ej. 'ARGUS-1237E630'
+ * @returns {Promise<{email: string, fcm_token: string|null}|null>}
+ */
+async function getOwnerByDeviceId(deviceId) {
+  const { rows } = await getPool().query(
+    `SELECT u.email, u.fcm_token
+     FROM users u
+     JOIN user_devices ud ON ud.user_id = u.id
+     WHERE ud.device_id = $1
+     LIMIT 1`,
+    [deviceId],
+  );
+  return rows[0] ?? null;
+}
+
+/**
  * @brief Retorna todos los usuarios con sus motos y dispositivos asignados.
  *        Usado por el endpoint /api/fleet del web operador.
  * @returns {Promise<Array<{ userId, email, plan, motos }>>}
@@ -165,4 +194,4 @@ async function findAllByRole(role) {
   return rows;
 }
 
-module.exports = { findByEmail, findById, createUser, addDevice, getDevices, getDeviceOwner, getAllUsersWithDevices, findAllByRole };
+module.exports = { findByEmail, findById, createUser, addDevice, getDevices, getDeviceOwner, getAllUsersWithDevices, findAllByRole, saveFcmToken, getOwnerByDeviceId };

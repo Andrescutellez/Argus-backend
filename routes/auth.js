@@ -17,6 +17,7 @@
 const { Router } = require('express');
 const { register, login, me, createAgent, listAgents } = require('../controllers/authController');
 const { authenticate, requireRole } = require('../middleware/auth');
+const { saveFcmToken } = require('../models/User');
 
 const router = Router();
 
@@ -27,5 +28,24 @@ router.get('/me',        authenticate, me);
 // Gestión de agentes de reacción — solo SUPER_ADMIN
 router.post('/agents', authenticate, requireRole('SUPER_ADMIN'), createAgent);
 router.get('/agents',  authenticate, requireRole('SUPER_ADMIN'), listAgents);
+
+/**
+ * POST /api/auth/fcm-token
+ * Guarda o actualiza el token FCM del usuario autenticado.
+ * La app Flutter llama esto al arrancar para que el backend sepa a dónde enviar push.
+ * Body: { token: string }
+ */
+router.post('/fcm-token', authenticate, async (req, res) => {
+  const { token } = req.body;
+  if (!token || typeof token !== 'string') {
+    return res.status(400).json({ error: 'token requerido' });
+  }
+  try {
+    await saveFcmToken(req.user.id, token);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 module.exports = router;

@@ -27,6 +27,7 @@ const { checkGeofence } = require('./geofenceMonitor');   // Geocerca: detecta s
 const Alert = require('../models/Alert');
 const DeviceState = require('../models/DeviceState');
 const DriveMetrics = require('../models/DriveMetrics');
+const { sendAlarmPush } = require('../services/pushService');
 
 // ─── CONSTANTES DE CONFIGURACIÓN ─────────────────────────────────────────────
 
@@ -483,6 +484,14 @@ async function persistAlert({ deviceId, type, source, lat, lon, timestamp }) {
   // En el futuro esto debería ser io.to(deviceId).emit() para que cada usuario
   // solo reciba alertas de sus propios dispositivos, no de toda la flota.
   if (ioRef) ioRef.emit('alert:new', alert.toObject());
+
+  // Push notification al dueño — solo para alarma física (vibración MPU6050).
+  // Fire-and-forget: si falla no afecta el flujo TCP ni el ACK al ESP32.
+  if (type === 'STATE_ALERT') {
+    sendAlarmPush(deviceId, lat, lon).catch((err) =>
+      log('error', 'push.alarm_error', { deviceId, err: err.message }),
+    );
+  }
 }
 
 // ─── FÁBRICA DEL SERVIDOR TCP ─────────────────────────────────────────────────

@@ -41,6 +41,7 @@ const { Server } = require('socket.io'); // Capa WebSocket sobre el server HTTP
 // ─── 3. MÓDULOS INTERNOS ──────────────────────────────────────────────────────
 const connectDB = require('./config/db');              // Establece la conexión a MongoDB Atlas
 const { initPostgres } = require('./config/postgres'); // Pool y schema PostgreSQL
+const { initFirebase } = require('./config/firebase'); // Firebase Admin SDK (push notifications)
 const gpsRoutes = require('./routes/gps');             // Rutas REST para datos GPS
 const deviceRoutes = require('./routes/device');       // Rutas REST para gestión de dispositivos
 const alertRoutes = require('./routes/alert');         // Rutas REST para historial de alertas
@@ -152,6 +153,10 @@ connectDB();
 // Es async pero el servidor puede arrancar en paralelo; los endpoints de auth
 // no estarán disponibles hasta que la promesa se resuelva (~100ms en LAN).
 initPostgres();
+
+// Inicializa Firebase Admin SDK para push notifications.
+// Si falta config/firebase-service-account.json, queda desactivado sin romper el servidor.
+initFirebase();
 
 // Arranca el worker que drena la cola en memoria hacia MongoDB cada 2 segundos.
 // Si esto no se llama, los datos GPS se acumularán en el array queue[] de

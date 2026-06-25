@@ -106,6 +106,11 @@ async function initPostgres() {
     END $$
   `);
 
+  // Migración: columna fcm_token para push notifications (idempotente).
+  await pool.query(`
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS fcm_token TEXT
+  `);
+
   // user_devices vincula un usuario con los deviceIds ESP32 que le pertenecen.
   // Un usuario puede tener múltiples dispositivos; un dispositivo pertenece a un usuario.
   await pool.query(`
