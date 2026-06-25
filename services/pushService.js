@@ -18,8 +18,9 @@
 
 'use strict';
 
-const { getAdmin }           = require('../config/firebase');
-const { getOwnerByDeviceId } = require('../models/User');
+const { getAdmin }             = require('../config/firebase');
+const { getOwnerByDeviceId }   = require('../models/User');
+const { getMotoByDeviceId }    = require('../models/Moto');
 
 /**
  * @brief Envía push notification de alarma al dueño del dispositivo.
@@ -32,24 +33,26 @@ async function sendAlarmPush(deviceId, lat, lon) {
   if (!admin) return; // Firebase no configurado
 
   try {
-    const owner = await getOwnerByDeviceId(deviceId);
+    const [owner, moto] = await Promise.all([
+      getOwnerByDeviceId(deviceId),
+      getMotoByDeviceId(deviceId).catch(() => null),
+    ]);
+
     if (!owner?.fcm_token) {
       console.log(`[Push] Sin fcm_token para deviceId=${deviceId} — omitiendo push.`);
       return;
     }
 
-    const hasCoords = lat != null && lon != null;
-    const coordStr  = hasCoords
-      ? `Últ. posición: ${lat.toFixed(4)}, ${lon.toFixed(4)}`
-      : 'Sin coordenadas GPS al momento';
+    // Identificador amigable de la moto (alias > placa > deviceId)
+    const motoLabel = moto?.alias || moto?.placa || deviceId;
 
     const message = {
       token: owner.fcm_token,
 
-      // Notificación visible (título + cuerpo)
+      // Notificación visible — sin coordenadas, mensaje directo al grano
       notification: {
-        title: '🚨 ¡ALARMA ARGUS!',
-        body:  `Tu moto se está moviendo. ${coordStr}`,
+        title: '🚨 Alarma Argus',
+        body:  `Sistema armado · ${motoLabel} se está moviendo`,
       },
 
       // Data payload para que la app pueda navegar directamente
@@ -86,7 +89,7 @@ async function sendAlarmPush(deviceId, lat, lon) {
     };
 
     await admin.messaging().send(message);
-    console.log(`[Push] Alarma enviada → ${owner.email} (${deviceId})`);
+    console.log(`[Push] Alarma enviada → ${owner.email} | ${motoLabel} (${deviceId})`);
   } catch (err) {
     console.error(`[Push] Error enviando alarma para ${deviceId}:`, err.message);
   }
