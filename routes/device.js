@@ -37,17 +37,28 @@
 
 'use strict';
 
-const { Router } = require('express');
+const { Router }   = require('express');
+const rateLimit     = require('express-rate-limit');
 const { getDeviceStatus, postCommand } = require('../controllers/deviceController');
 const { authenticate, canAccessDevice } = require('../middleware/auth');
 
 const router = Router();
 
+// Máximo 10 comandos por minuto por IP. Protege contra scripts que manden
+// ARM/DISARM/ENGINE_CUT en loop — 10/min es holgado para uso normal.
+const commandLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Demasiados comandos. Espera un momento.' },
+});
+
 // GET /api/device/:deviceId/status — USER ve solo sus devices, ADMIN ve todos
 router.get('/:deviceId/status', authenticate, canAccessDevice, getDeviceStatus);
 
-// POST /api/device/:deviceId/command — misma lógica de acceso que status
-router.post('/:deviceId/command', authenticate, canAccessDevice, postCommand);
+// POST /api/device/:deviceId/command — rate limit antes de auth para frenar brute-force
+router.post('/:deviceId/command', commandLimiter, authenticate, canAccessDevice, postCommand);
 
 module.exports = router;
 

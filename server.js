@@ -37,6 +37,7 @@ const http = require('http');      // Módulo nativo: crea el servidor HTTP suby
 const express = require('express'); // Framework de routing y middleware HTTP
 const cors = require('cors');       // Middleware que agrega cabeceras CORS a cada respuesta
 const { Server } = require('socket.io'); // Capa WebSocket sobre el server HTTP
+const jwt        = require('jsonwebtoken'); // Verificación de tokens JWT en el handshake WebSocket
 
 // ─── 3. MÓDULOS INTERNOS ──────────────────────────────────────────────────────
 const connectDB = require('./config/db');              // Establece la conexión a MongoDB Atlas
@@ -107,6 +108,22 @@ const io = new Server(httpServer, {
   cors: { origin: '*' },
 });
 
+// ─── AUTENTICACIÓN SOCKET.IO ─────────────────────────────────────────────────
+// io.use() se ejecuta en el handshake inicial antes de que el socket se establezca.
+// Si next(Error) se llama, el cliente recibe 'connect_error' y no puede recibir eventos.
+// El token viaja en socket.handshake.auth.token (opción 'auth' de socket.io-client).
+// No usamos query params para el token porque quedarían en logs de nginx.
+io.use((socket, next) => {
+  const token = socket.handshake.auth?.token;
+  if (!token) return next(new Error('unauthorized'));
+  try {
+    socket.data.user = jwt.verify(token, process.env.JWT_SECRET);
+    return next();
+  } catch {
+    return next(new Error('unauthorized'));
+  }
+});
+
 // Registrar io en el singleton para que controllers REST puedan emitir
 setIo(io);
 
@@ -114,7 +131,8 @@ setIo(io);
 // para recibir 'incident:new' y 'incident:resolved' en tiempo real.
 // Los usuarios normales se unen al room de su deviceId (ya manejado en tcpServer).
 io.on('connection', (socket) => {
-  const role     = socket.handshake.query?.role;
+  // Rol viene del JWT verificado, no del query param (que cualquiera puede falsificar).
+  const role     = socket.data.user?.role;
   const deviceId = socket.handshake.query?.deviceId;
 
   if (role === 'REACTION') {
@@ -297,8 +315,8 @@ module.exports = { io };
 
    RIESGOS DE SEGURIDAD:
    - CORS con origin:'*' permite que cualquier página web acceda a la API
-   - Socket.io sin autenticación emite posiciones GPS a cualquier cliente conectado
-   - No hay rate limiting global en la capa HTTP (solo en TCP)
+   - Socket.io: autenticación JWT implementada via io.use() — resuelto 2026-07-04
+   - Rate limiting en POST /api/device/:id/command (10/min) — resuelto 2026-07-04
 
    RIESGOS DE CONCURRENCIA:
    - connectDB() es async pero se llama sin await; en un arranque muy rápido
@@ -352,10 +370,9 @@ module.exports = { io };
 */
 
 /* MEJORAS RECOMENDADAS:
-   1. Autenticación en Socket.io: middleware io.use() que valide JWT antes
-      de permitir la suscripción a 'gps:update'.
+   1. ✅ Autenticación en Socket.io: io.use() con JWT implementado 2026-07-04.
    2. CORS restrictivo: reemplazar origin:'*' por lista de dominios en .env.
-   3. Rate limiting HTTP: express-rate-limit en /api/ para prevenir abuso.
+   3. ✅ Rate limiting HTTP: express-rate-limit en POST /api/device/command (2026-07-04).
    4. Helmet.js: cabeceras de seguridad HTTP (X-Frame-Options, CSP, etc.).
    5. Graceful shutdown: manejar SIGTERM para drenar la cola antes de salir
       y evitar pérdida de datos GPS en cola cuando Cloud Run rota instancias.
