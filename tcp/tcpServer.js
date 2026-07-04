@@ -712,6 +712,36 @@ function createTcpServer(io) {
           continue; // No procesar este línea como frame GPS
         }
 
+        // ── FRAME DE DIAGNÓSTICO: DIAG ───────────────────────────────────
+        // Enviado por el firmware en cada nueva conexión TCP, justo después
+        // del primer ARGUS exitoso. No tiene firma CRC — solo datos informativos.
+        // El device ya está autenticado cuando este frame llega.
+        // Formato: "DIAG|deviceId|rssi|cgatt"
+        if (line.startsWith('DIAG|')) {
+          const parts = line.split('|');
+          if (parts.length === 4 && parts[1] === deviceId) {
+            const rssi  = parseInt(parts[2], 10);
+            const cgatt = parseInt(parts[3], 10) === 1;
+            const now   = new Date();
+
+            DeviceState.findOneAndUpdate(
+              { deviceId },
+              { rssi, cgatt, lastDiagAt: now },
+              { upsert: true },
+            ).catch((err) => log('error', 'tcp.diag.persist_error', { deviceId, err: err.message }));
+
+            if (io) {
+              io.to(`device:${deviceId}`).emit('device:diag', { deviceId, rssi, cgatt });
+            }
+
+            log('info', 'tcp.diag.accepted', { deviceId, rssi, cgatt });
+            // El firmware no espera respuesta al DIAG — no se hace socket.write()
+          } else {
+            log('warn', 'tcp.diag.malformed', { remote, raw: line.slice(0, 80) });
+          }
+          continue;
+        }
+
         // ── FRAME DE CONDUCCIÓN: DRIVE ───────────────────────────────────
         if (line.startsWith('DRIVE|')) {
           const drive = parseDrivePacket(line);

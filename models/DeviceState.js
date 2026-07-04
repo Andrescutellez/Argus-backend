@@ -84,6 +84,27 @@ const DeviceStateSchema = new Schema(
     },
 
     /**
+     * Señal celular reportada por el frame DIAG en la última conexión TCP.
+     * Escala AT+CSQ: 0-31 (31=excelente, <10=pésimo, 99=sin lectura del modem).
+     * null si el firmware no ha enviado ningún DIAG todavía (device no flasheado).
+     */
+    rssi: { type: Number, default: null },
+
+    /**
+     * Estado del contexto de datos (AT+CGATT) en la última conexión TCP.
+     * true  → el operador tiene PDP context activo (datos ok).
+     * false → sin contexto de datos (plan vencido/agotado, aunque TCP abre brevemente).
+     * null  → sin DIAG recibido todavía.
+     */
+    cgatt: { type: Boolean, default: null },
+
+    /**
+     * Cuándo llegó el último frame DIAG de este device.
+     * Permite detectar firmware antiguo (sin DIAG) vs firmware nuevo sin conexión reciente.
+     */
+    lastDiagAt: { type: Date, default: null },
+
+    /**
      * Cuándo fue la última actualización de este documento.
      * Útil para detectar devices cuyo estado no se ha actualizado en mucho tiempo
      * (posible desconexión prolongada o fallo de sincronización).

@@ -95,7 +95,12 @@
       "Read(//c/Users/Leonardo/Desktop/Proyecto Argus/Argus-IDF/components/services/**)",
       "Read(//c/Users/Leonardo/Desktop/Proyecto Argus/Argus-IDF/components/**)",
       "Read(//c/Users/Leonardo/Desktop/Proyecto Argus/Argus-IDF/components/core/include/**)",
-      "Read(//c/Users/Leonardo/Desktop/Proyecto Argus/Argus-IDF/components/drivers/**)"
+      "Read(//c/Users/Leonardo/Desktop/Proyecto Argus/Argus-IDF/components/drivers/**)",
+      "Read(//c/Users/Leonardo/Desktop/Proyecto Argus/Argus-IDF/**)",
+      "Read(//c/Users/Leonardo/Desktop/Proyecto Argus/argus-web-usuario/src/pages/**)",
+      "Read(//c/Users/Leonardo/Desktop/Proyecto Argus/argus_app/lib/screens/**)",
+      "Read(//c/Users/Leonardo/Desktop/Proyecto Argus/argus_app/lib/services/**)",
+      "Read(//c/Users/Leonardo/Desktop/Proyecto Argus/argus-web-usuario/src/api/**)"
     ],
     "additionalDirectories": [
       "c:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\argus_app",
@@ -118,7 +123,11 @@
       "c:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\argus_app\\lib\\screens",
       "C:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\Argus-IDF\\components\\core\\include",
       "C:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\Argus-IDF\\components\\drivers",
-      "C:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\Argus-IDF\\components\\services"
+      "C:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\Argus-IDF\\components\\services",
+      "c:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\Argus-IDF\\components\\drivers\\include",
+      "c:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\Argus-IDF\\components\\drivers",
+      "c:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\Argus-IDF\\components\\services",
+      "c:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\argus_app\\lib\\services"
     ]
   }
 }
