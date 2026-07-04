@@ -77,7 +77,15 @@ const ACCEL_HARD_THRESHOLD = 0.5; // g
  * @param {number} maxAccel  - Pico máximo de desviación de 1g en el período (g).
  * @returns {number} — Score redondeado [0, 100].
  */
-function computeScore(totalHard, totalSoft, maxAccel) {
+// Velocidad promedio desde la cual se considera conducción rápida (penaliza score).
+// Por debajo de este umbral, la velocidad no afecta el score (conducción urbana normal).
+const SPEED_PENALTY_THRESHOLD_KMH = 90;
+// Penalización por cada km/h por encima del umbral de velocidad.
+const PENALTY_PER_KMH_OVER        = 0.3;
+// Penalización máxima por velocidad excesiva (cap en -15 pts).
+const MAX_SPEED_PENALTY            = 15;
+
+function computeScore(totalHard, totalSoft, maxAccel, avgSpeedKmh = 0) {
   let penalty = 0;
 
   // Hard events son el mayor indicador de conducción agresiva.
@@ -92,6 +100,13 @@ function computeScore(totalHard, totalSoft, maxAccel) {
     penalty += 15; // Impacto severo (caída, choque, tope)
   } else if (maxAccel >= ACCEL_HARD_THRESHOLD) {
     penalty += 8;  // Frenada de emergencia o aceleración brusca
+  }
+
+  // Velocidad media: penaliza conducción sostenidamente rápida.
+  // Solo activa si el firmware reportó avgSpeedKmh (campo v2 del frame DRIVE).
+  if (avgSpeedKmh > SPEED_PENALTY_THRESHOLD_KMH) {
+    const over = avgSpeedKmh - SPEED_PENALTY_THRESHOLD_KMH;
+    penalty += Math.min(over * PENALTY_PER_KMH_OVER, MAX_SPEED_PENALTY);
   }
 
   return Math.max(0, Math.round(100 - penalty));
@@ -186,14 +201,20 @@ async function getMetrics(req, res) {
   let maxGyro = 0;
 
   // Acumulación en un solo pass por el array: O(n) en lugar de múltiples reduce().
+  let   totalDistM    = 0;
+  let   speedSumKmh   = 0;
+  let   speedSamples  = 0;
   for (const s of sessions) {
     totalHard += s.hardCount;
     totalSoft += s.softCount;
     if (s.peakAccelDev > maxAccel) maxAccel = s.peakAccelDev;
     if (s.peakGyroMag  > maxGyro)  maxGyro  = s.peakGyroMag;
+    if (s.distanceM   != null) totalDistM   += s.distanceM;
+    if (s.avgSpeedKmh != null) { speedSumKmh += s.avgSpeedKmh; speedSamples++; }
   }
+  const overallAvgSpeed = speedSamples > 0 ? speedSumKmh / speedSamples : 0;
 
-  const score = computeScore(totalHard, totalSoft, maxAccel);
+  const score = computeScore(totalHard, totalSoft, maxAccel, overallAvgSpeed);
 
   // ── Breakdown diario (para gráfico de tendencia) ──────────────────────────
   // Agrupa los documentos por fecha "YYYY-MM-DD" y calcula score por día.
@@ -201,40 +222,48 @@ async function getMetrics(req, res) {
   const dayMap = new Map();
 
   for (const s of sessions) {
-    // toISOString() → "2026-06-16T12:34:56.789Z" → slice(0,10) → "2026-06-16"
     const dateKey = new Date(s.timestamp).toISOString().slice(0, 10);
 
     if (!dayMap.has(dateKey)) {
-      dayMap.set(dateKey, { date: dateKey, hard: 0, soft: 0, maxAccel: 0, sessions: 0 });
+      dayMap.set(dateKey, { date: dateKey, hard: 0, soft: 0, maxAccel: 0, sessions: 0, speedSum: 0, speedN: 0, distM: 0 });
     }
 
     const day = dayMap.get(dateKey);
-    day.hard    += s.hardCount;
-    day.soft    += s.softCount;
+    day.hard     += s.hardCount;
+    day.soft     += s.softCount;
     day.sessions += 1;
     if (s.peakAccelDev > day.maxAccel) day.maxAccel = s.peakAccelDev;
+    if (s.distanceM   != null) day.distM   += s.distanceM;
+    if (s.avgSpeedKmh != null) { day.speedSum += s.avgSpeedKmh; day.speedN++; }
   }
 
-  const dailyBreakdown = Array.from(dayMap.values()).map((d) => ({
-    date: d.date,
-    score: computeScore(d.hard, d.soft, d.maxAccel),
-    hardCount: d.hard,
-    softCount: d.soft,
-    sessionCount: d.sessions,
-    maxPeakAccelDev: parseFloat(d.maxAccel.toFixed(4)),
-  }));
+  const dailyBreakdown = Array.from(dayMap.values()).map((d) => {
+    const dayAvgSpeed = d.speedN > 0 ? d.speedSum / d.speedN : 0;
+    return {
+      date:            d.date,
+      score:           computeScore(d.hard, d.soft, d.maxAccel, dayAvgSpeed),
+      hardCount:       d.hard,
+      softCount:       d.soft,
+      sessionCount:    d.sessions,
+      maxPeakAccelDev: parseFloat(d.maxAccel.toFixed(4)),
+      avgSpeedKmh:     dayAvgSpeed > 0 ? parseFloat(dayAvgSpeed.toFixed(1)) : null,
+      distanceKm:      d.distM > 0 ? parseFloat((d.distM / 1000).toFixed(2)) : null,
+    };
+  });
 
   // Formato de las sesiones raw: omitir campos internos de Mongoose (__v, createdAt)
   // y redondear los floats para no enviar 8 decimales innecesarios.
   const formattedSessions = sessions.map((s) => ({
-    id: s._id,
-    lat: s.lat,
-    lon: s.lon,
+    id:           s._id,
+    lat:          s.lat,
+    lon:          s.lon,
     peakAccelDev: parseFloat(s.peakAccelDev.toFixed(4)),
     peakGyroMag:  parseFloat(s.peakGyroMag.toFixed(2)),
-    hardCount: s.hardCount,
-    softCount: s.softCount,
-    timestamp: s.timestamp,
+    hardCount:    s.hardCount,
+    softCount:    s.softCount,
+    avgSpeedKmh:  s.avgSpeedKmh != null ? parseFloat(s.avgSpeedKmh.toFixed(1)) : null,
+    distanceM:    s.distanceM   != null ? parseFloat(s.distanceM.toFixed(1))   : null,
+    timestamp:    s.timestamp,
   }));
 
   return res.status(200).json({
@@ -251,6 +280,8 @@ async function getMetrics(req, res) {
       totalSoftEvents:  totalSoft,
       maxPeakAccelDev:  parseFloat(maxAccel.toFixed(4)),
       maxPeakGyroMag:   parseFloat(maxGyro.toFixed(2)),
+      avgSpeedKmh:      overallAvgSpeed > 0 ? parseFloat(overallAvgSpeed.toFixed(1)) : null,
+      totalDistanceKm:  totalDistM > 0 ? parseFloat((totalDistM / 1000).toFixed(2)) : null,
     },
     dailyBreakdown,
     sessions: formattedSessions,

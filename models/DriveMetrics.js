@@ -100,6 +100,21 @@ const DriveMetricsSchema = new Schema(
     softCount: { type: Number, required: true, min: 0, default: 0 },
 
     /**
+     * Velocidad media haversine de la ventana (~30s) en km/h.
+     * Calculada en firmware como distancia(prev_fix, curr_fix) / tiempo_entre_fixes.
+     * Mucho más precisa que la velocidad GNSS instantánea, especialmente tras GPS sleep.
+     * null si el firmware es anterior a v2 del frame DRIVE (dispositivos no actualizados).
+     */
+    avgSpeedKmh: { type: Number, default: null },
+
+    /**
+     * Distancia recorrida haversine en la ventana en metros.
+     * Permite al backend calcular km totales recorridos en el período sin depender de GPS.
+     * null si el firmware es anterior a v2 del frame DRIVE.
+     */
+    distanceM: { type: Number, default: null },
+
+    /**
      * Timestamp de fin de la ventana de medición (epoch_ms del ESP32, convertido a Date).
      * Para source='device': timestamp del frame DRIVE que cierra la ventana.
      */

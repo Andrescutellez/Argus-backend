@@ -66,6 +66,18 @@ const INACTIVITY_TIMEOUT_MS = 600_000;
  */
 const RATE_LIMIT_MS = 5_000;
 
+/**
+ * Antigüedad máxima en ms que se acepta en el timestamp de un paquete.
+ *
+ * Protege contra replay attacks: si un atacante captura un paquete válido
+ * (firma CRC32 correcta) y lo reenvía horas después, el servidor lo rechaza
+ * porque su timestamp es demasiado viejo. 60 segundos da margen para
+ * variaciones de reloj entre el ESP32 (sincroniza por GNSS) y el servidor.
+ *
+ * Los keepalives (timestamp=0) están exentos de este check.
+ */
+const MAX_PACKET_AGE_MS = 60_000;
+
 // ─── ESTADO GLOBAL DEL SERVIDOR TCP ──────────────────────────────────────────
 
 /**
@@ -367,10 +379,15 @@ function parseEventPacket(line) {
 function parseDrivePacket(line) {
   const parts = line.trim().split('|');
 
-  // 10 campos: DRIVE, deviceId, epoch, lat, lon, peakAccelDev, peakGyroMag, hardCount, softCount, crc32.
-  if (parts.length !== 10 || parts[0] !== 'DRIVE') return null;
+  // Frame v1 (legado): 10 campos — DRIVE|id|epoch|lat|lon|accel|gyro|hard|soft|crc32
+  // Frame v2 (actual): 12 campos — añade avgSpeedKmh y distanceM antes del crc32
+  const isV2 = parts.length === 12;
+  if ((parts.length !== 10 && parts.length !== 12) || parts[0] !== 'DRIVE') return null;
 
-  const [, deviceId, timestamp, lat, lon, peakAccelDev, peakGyroMag, hardCount, softCount, signature] = parts;
+  const [, deviceId, timestamp, lat, lon, peakAccelDev, peakGyroMag, hardCount, softCount] = parts;
+  const avgSpeedKmh = isV2 ? parts[9]  : null;
+  const distanceM   = isV2 ? parts[10] : null;
+  const signature   = isV2 ? parts[11] : parts[9];
 
   if (!deviceId || !timestamp || !lat || !lon || !peakAccelDev || !peakGyroMag
     || hardCount === '' || softCount === '' || !signature) return null;
@@ -384,6 +401,8 @@ function parseDrivePacket(line) {
     peakGyroMag:  parseFloat(peakGyroMag),
     hardCount:    parseInt(hardCount, 10),
     softCount:    parseInt(softCount, 10),
+    avgSpeedKmh:  avgSpeedKmh !== null ? parseFloat(avgSpeedKmh) : null,
+    distanceM:    distanceM   !== null ? parseFloat(distanceM)   : null,
     signature,
   };
 }
@@ -417,8 +436,8 @@ function parseDrivePacket(line) {
  * @param {Date}   data.timestamp
  * @returns {Promise<void>}
  */
-async function persistDriveMetrics({ deviceId, lat, lon, peakAccelDev, peakGyroMag, hardCount, softCount, timestamp }) {
-  await DriveMetrics.create({ deviceId, lat, lon, peakAccelDev, peakGyroMag, hardCount, softCount, timestamp });
+async function persistDriveMetrics({ deviceId, lat, lon, peakAccelDev, peakGyroMag, hardCount, softCount, avgSpeedKmh, distanceM, timestamp }) {
+  await DriveMetrics.create({ deviceId, lat, lon, peakAccelDev, peakGyroMag, hardCount, softCount, avgSpeedKmh, distanceM, timestamp });
 }
 
 /**
@@ -480,10 +499,9 @@ async function persistAlert({ deviceId, type, source, lat, lon, timestamp }) {
     );
   }
 
-  // Notificar a todos los clientes WebSocket conectados.
-  // En el futuro esto debería ser io.to(deviceId).emit() para que cada usuario
-  // solo reciba alertas de sus propios dispositivos, no de toda la flota.
-  if (ioRef) ioRef.emit('alert:new', alert.toObject());
+  // Solo notifica al room del device dueño de la alerta.
+  // El cliente se une a device:${deviceId} al conectar (server.js, handshake query).
+  if (ioRef) ioRef.to(`device:${deviceId}`).emit('alert:new', alert.toObject());
 
   // Push notification al dueño — solo para alarma física (vibración MPU6050).
   // Fire-and-forget: si falla no afecta el flujo TCP ni el ACK al ESP32.
@@ -652,6 +670,13 @@ function createTcpServer(io) {
             continue;
           }
 
+          // Anti-replay: rechazar eventos con timestamp demasiado viejo o futuro.
+          if (Math.abs(Date.now() - Number(event.timestamp)) > MAX_PACKET_AGE_MS) {
+            log('warn', 'tcp.event.replay', { deviceId: event.deviceId, ts: event.timestamp });
+            socket.write('ERR\r\n');
+            continue;
+          }
+
           // Registrar el device en connectedDevices si no estaba.
           // Un device puede enviar un EVENT sin haber enviado antes un GPS frame
           // (ej: se armó justo después de conectarse). Esto asegura que los
@@ -722,6 +747,13 @@ function createTcpServer(io) {
             continue;
           }
 
+          // Anti-replay: rechazar métricas con timestamp demasiado viejo o futuro.
+          if (Math.abs(Date.now() - Number(drive.timestamp)) > MAX_PACKET_AGE_MS) {
+            log('warn', 'tcp.drive.replay', { deviceId: drive.deviceId, ts: drive.timestamp });
+            socket.write('ERR\r\n');
+            continue;
+          }
+
           // Registrar el device si el DRIVE llega antes que el GPS frame de la sesión.
           if (deviceId !== drive.deviceId) {
             deviceId = drive.deviceId;
@@ -742,6 +774,8 @@ function createTcpServer(io) {
             peakGyroMag:  isNaN(drive.peakGyroMag)  ? 0 : drive.peakGyroMag,
             hardCount:    isNaN(drive.hardCount)     ? 0 : drive.hardCount,
             softCount:    isNaN(drive.softCount)     ? 0 : drive.softCount,
+            avgSpeedKmh:  (drive.avgSpeedKmh !== null && !isNaN(drive.avgSpeedKmh)) ? drive.avgSpeedKmh : null,
+            distanceM:    (drive.distanceM   !== null && !isNaN(drive.distanceM))   ? drive.distanceM   : null,
             timestamp:    new Date(Number(drive.timestamp) || Date.now()),
           }).catch((err) => log('error', 'tcp.drive.persist_error', { deviceId, err: err.message }));
 
@@ -810,6 +844,17 @@ function createTcpServer(io) {
             socket.destroy();
             return;
           }
+          continue;
+        }
+
+        // ── PASO 3b: Protección anti-replay ──────────────────────────────
+        // Rechazar paquetes con timestamp demasiado viejo o futuro.
+        // Los keepalives (timestamp='0') están exentos: son intencionalmente
+        // "sin hora real" y se manejan en PASO 7.
+        const packetTs = Number(packet.timestamp);
+        if (packet.timestamp !== '0' && Math.abs(Date.now() - packetTs) > MAX_PACKET_AGE_MS) {
+          log('warn', 'tcp.packet.replay', { deviceId: packet.deviceId, ts: packet.timestamp });
+          socket.write('ERR\r\n');
           continue;
         }
 
@@ -902,8 +947,10 @@ function createTcpServer(io) {
         });
 
         // ── PASO 9: Push en tiempo real al frontend ───────────────────────
+        // io.to() envía solo al room del device, no a toda la flota.
+        // El cliente se une a device:${deviceId} en el handshake (server.js).
         if (io) {
-          io.emit('gps:update', {
+          io.to(`device:${deviceId}`).emit('gps:update', {
             deviceId,
             lat,
             lon:   lng,

@@ -33,17 +33,34 @@ const ManufacturedDevice = require('../models/ManufacturedDevice');
  * (en logs, en el firmware del ESP32 sin protección, en el código fuente),
  * la seguridad de la autenticación queda comprometida.
  *
- * El fallback 'argus-dev-secret' es deliberadamente débil para que sea obvio
- * en producción que no se ha configurado: si un log de error menciona
- * "argus-dev-secret", el equipo sabe que falta configurar TCP_SECRET en .env.
- *
- * ARQUITECTURA ⚠️: secreto con fallback hardcodeado
- *   CÓMO LO HARÍA UN SENIOR: eliminar el fallback y lanzar un error si
- *   TCP_SECRET no está definido, igual que se hace con MONGO_URI en server.js.
- *   IMPACTO ACTUAL: si alguien despliega sin configurar TCP_SECRET, el servidor
- *   usa el secreto público 'argus-dev-secret' sin dar ningún error.
+ * Sin fallback intencional: si TCP_SECRET no está definido en .env, el proceso
+ * termina inmediatamente con código de error. Mismo patrón que MONGO_URI en server.js.
+ * Esto garantiza que un despliegue sin secreto configurado falle de forma visible
+ * en lugar de correr silenciosamente con el secreto público del código fuente.
  */
-const SECRET = process.env.TCP_SECRET || 'argus-dev-secret';
+const SECRET = process.env.TCP_SECRET;
+if (!SECRET) {
+  console.error('ERROR: TCP_SECRET is not defined. Set it in .env before starting the server.');
+  process.exit(1);
+}
+
+// ─── CACHE DE AUTORIZACIÓN ────────────────────────────────────────────────────
+
+/**
+ * Cache en memoria de resultados isManufactured() con TTL de 5 minutos.
+ *
+ * PROPÓSITO: el servidor TCP llama isAllowed() por cada paquete GPS recibido
+ * (cada 3-30 segundos por device). Sin cache, cada paquete genera una query
+ * SELECT a PostgreSQL. Con 50 devices activos serían >100 queries/min para
+ * una respuesta que prácticamente nunca cambia.
+ *
+ * TTL de 5 min: balance entre frescura (un device revocado tarda max 5 min
+ * en quedar bloqueado) y eficiencia (reducción de queries ~99%).
+ *
+ * @type {Map<string, { allowed: boolean, expiresAt: number }>}
+ */
+const allowedCache = new Map();
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutos
 
 // ─── IMPLEMENTACIÓN DE CRC32 ──────────────────────────────────────────────────
 
@@ -148,7 +165,12 @@ function crc32Argus(text) {
  * @returns {Promise<boolean>} — true si el device está autorizado.
  */
 async function isAllowed(deviceId) {
-  return ManufacturedDevice.isManufactured(deviceId);
+  const cached = allowedCache.get(deviceId);
+  if (cached && Date.now() < cached.expiresAt) return cached.allowed;
+
+  const allowed = await ManufacturedDevice.isManufactured(deviceId);
+  allowedCache.set(deviceId, { allowed, expiresAt: Date.now() + CACHE_TTL_MS });
+  return allowed;
 }
 
 /**

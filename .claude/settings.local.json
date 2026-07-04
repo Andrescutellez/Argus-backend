@@ -82,7 +82,20 @@
       "Bash(git check-ignore *)",
       "Bash(rm check_braces.py)",
       "Bash(dart format *)",
-      "Bash(powershell -Command ' *)"
+      "Bash(powershell -Command ' *)",
+      "Read(//c/Users/Leonardo/Desktop/Proyecto Argus/Boveda Obsidian/Argus/_Claude/**)",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\Leonardo\\\\AppData\\\\Roaming\" -ErrorAction SilentlyContinue | Where-Object { $_.Name -match \"claude|Claude|anthropic\" } | Select-Object Name, FullName)",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\Leonardo\\\\.claude\" -Recurse | Where-Object { $_.Name -match \"mcp\" } | Select-Object FullName)",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\Leonardo\\\\.claude\" -Name | Where-Object { $_ -match \"\\\\.json$|mcp\" })",
+      "Bash(cat \"C:\\\\Users\\\\Leonardo\\\\.claude\\\\settings.json\" 2>/dev/null || echo \"NO ENCONTRADO\")",
+      "Read(//c/Users/Leonardo/.claude/**)",
+      "Bash(python -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d.get\\('mcpServers', {}\\), indent=2\\)\\)\")",
+      "Read(//c/Users/Leonardo/Desktop/Proyecto Argus/argus_app/android/app/**)",
+      "Bash(gh api *)",
+      "Read(//c/Users/Leonardo/Desktop/Proyecto Argus/Argus-IDF/components/services/**)",
+      "Read(//c/Users/Leonardo/Desktop/Proyecto Argus/Argus-IDF/components/**)",
+      "Read(//c/Users/Leonardo/Desktop/Proyecto Argus/Argus-IDF/components/core/include/**)",
+      "Read(//c/Users/Leonardo/Desktop/Proyecto Argus/Argus-IDF/components/drivers/**)"
     ],
     "additionalDirectories": [
       "c:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\argus_app",
@@ -99,7 +112,13 @@
       "C:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\argus-web-operador\\src",
       "C:\\Users\\Leonardo\\Desktop\\Portafolio\\assets",
       "C:\\Users\\Leonardo\\Desktop\\Portafolio",
-      "C:\\Users\\Leonardo\\Desktop\\Proyecto Argus"
+      "C:\\Users\\Leonardo\\Desktop\\Proyecto Argus",
+      "C:\\Users\\Leonardo\\.claude",
+      "C:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\argus-web-usuario\\src\\pages",
+      "c:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\argus_app\\lib\\screens",
+      "C:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\Argus-IDF\\components\\core\\include",
+      "C:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\Argus-IDF\\components\\drivers",
+      "C:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\Argus-IDF\\components\\services"
     ]
   }
 }
