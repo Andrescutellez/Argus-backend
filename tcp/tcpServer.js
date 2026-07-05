@@ -671,7 +671,9 @@ function createTcpServer(io) {
           }
 
           // Anti-replay: rechazar eventos con timestamp demasiado viejo o futuro.
-          if (Math.abs(Date.now() - Number(event.timestamp)) > MAX_PACKET_AGE_MS) {
+          // Excepción: timestamp=0 es el evento de boot (sin GPS fix aún) — mismo
+          // patrón que el keepalive del frame ARGUS, se acepta sin ventana temporal.
+          if (event.timestamp !== '0' && Math.abs(Date.now() - Number(event.timestamp)) > MAX_PACKET_AGE_MS) {
             log('warn', 'tcp.event.replay', { deviceId: event.deviceId, ts: event.timestamp });
             socket.write('ERR\r\n');
             continue;
@@ -719,23 +721,31 @@ function createTcpServer(io) {
         // Formato: "DIAG|deviceId|rssi|cgatt"
         if (line.startsWith('DIAG|')) {
           const parts = line.split('|');
-          if (parts.length === 4 && parts[1] === deviceId) {
-            const rssi  = parseInt(parts[2], 10);
-            const cgatt = parseInt(parts[3], 10) === 1;
-            const now   = new Date();
+          if (parts.length === 4) {
+            const diagDeviceId = parts[1];
+            // Verificar que el device esté registrado (whitelist), pero no requerir
+            // que el deviceId del scope ya esté seteado — el DIAG llega antes del
+            // primer ARGUS exitoso porque el EVENT de boot puede tener epoch=0.
+            if (await isAllowed(diagDeviceId)) {
+              const rssi  = parseInt(parts[2], 10);
+              const cgatt = parseInt(parts[3], 10) === 1;
+              const now   = new Date();
 
-            DeviceState.findOneAndUpdate(
-              { deviceId },
-              { rssi, cgatt, lastDiagAt: now },
-              { upsert: true },
-            ).catch((err) => log('error', 'tcp.diag.persist_error', { deviceId, err: err.message }));
+              DeviceState.findOneAndUpdate(
+                { deviceId: diagDeviceId },
+                { rssi, cgatt, lastDiagAt: now },
+                { upsert: true },
+              ).catch((err) => log('error', 'tcp.diag.persist_error', { deviceId: diagDeviceId, err: err.message }));
 
-            if (io) {
-              io.to(`device:${deviceId}`).emit('device:diag', { deviceId, rssi, cgatt });
+              if (io) {
+                io.to(`device:${diagDeviceId}`).emit('device:diag', { deviceId: diagDeviceId, rssi, cgatt });
+              }
+
+              log('info', 'tcp.diag.accepted', { deviceId: diagDeviceId, rssi, cgatt });
+              // El firmware no espera respuesta al DIAG — no se hace socket.write()
+            } else {
+              log('warn', 'tcp.diag.unknown_device', { remote, deviceId: parts[1] });
             }
-
-            log('info', 'tcp.diag.accepted', { deviceId, rssi, cgatt });
-            // El firmware no espera respuesta al DIAG — no se hace socket.write()
           } else {
             log('warn', 'tcp.diag.malformed', { remote, raw: line.slice(0, 80) });
           }
