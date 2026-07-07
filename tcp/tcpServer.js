@@ -380,14 +380,18 @@ function parseDrivePacket(line) {
   const parts = line.trim().split('|');
 
   // Frame v1 (legado): 10 campos — DRIVE|id|epoch|lat|lon|accel|gyro|hard|soft|crc32
-  // Frame v2 (actual): 12 campos — añade avgSpeedKmh y distanceM antes del crc32
+  // Frame v2: 12 campos — añade avgSpeedKmh y distanceM antes del crc32
+  // Frame v3 (actual): 14 campos — añade maxSpeedKmh y stoppedSec antes del crc32
   const isV2 = parts.length === 12;
-  if ((parts.length !== 10 && parts.length !== 12) || parts[0] !== 'DRIVE') return null;
+  const isV3 = parts.length === 14;
+  if ((parts.length !== 10 && !isV2 && !isV3) || parts[0] !== 'DRIVE') return null;
 
   const [, deviceId, timestamp, lat, lon, peakAccelDev, peakGyroMag, hardCount, softCount] = parts;
-  const avgSpeedKmh = isV2 ? parts[9]  : null;
-  const distanceM   = isV2 ? parts[10] : null;
-  const signature   = isV2 ? parts[11] : parts[9];
+  const avgSpeedKmh = (isV2 || isV3) ? parts[9]  : null;
+  const distanceM   = (isV2 || isV3) ? parts[10] : null;
+  const maxSpeedKmh = isV3           ? parts[11] : null;
+  const stoppedSec  = isV3           ? parts[12] : null;
+  const signature   = isV3 ? parts[13] : isV2 ? parts[11] : parts[9];
 
   if (!deviceId || !timestamp || !lat || !lon || !peakAccelDev || !peakGyroMag
     || hardCount === '' || softCount === '' || !signature) return null;
@@ -403,6 +407,8 @@ function parseDrivePacket(line) {
     softCount:    parseInt(softCount, 10),
     avgSpeedKmh:  avgSpeedKmh !== null ? parseFloat(avgSpeedKmh) : null,
     distanceM:    distanceM   !== null ? parseFloat(distanceM)   : null,
+    maxSpeedKmh:  maxSpeedKmh !== null ? parseFloat(maxSpeedKmh) : null,
+    stoppedSec:   stoppedSec  !== null ? parseInt(stoppedSec, 10) : null,
     signature,
   };
 }
@@ -436,8 +442,8 @@ function parseDrivePacket(line) {
  * @param {Date}   data.timestamp
  * @returns {Promise<void>}
  */
-async function persistDriveMetrics({ deviceId, lat, lon, peakAccelDev, peakGyroMag, hardCount, softCount, avgSpeedKmh, distanceM, timestamp }) {
-  await DriveMetrics.create({ deviceId, lat, lon, peakAccelDev, peakGyroMag, hardCount, softCount, avgSpeedKmh, distanceM, timestamp });
+async function persistDriveMetrics({ deviceId, lat, lon, peakAccelDev, peakGyroMag, hardCount, softCount, avgSpeedKmh, distanceM, maxSpeedKmh, stoppedSec, timestamp }) {
+  await DriveMetrics.create({ deviceId, lat, lon, peakAccelDev, peakGyroMag, hardCount, softCount, avgSpeedKmh, distanceM, maxSpeedKmh, stoppedSec, timestamp });
 }
 
 /**
@@ -814,8 +820,10 @@ function createTcpServer(io) {
             peakGyroMag:  isNaN(drive.peakGyroMag)  ? 0 : drive.peakGyroMag,
             hardCount:    isNaN(drive.hardCount)     ? 0 : drive.hardCount,
             softCount:    isNaN(drive.softCount)     ? 0 : drive.softCount,
-            avgSpeedKmh:  (drive.avgSpeedKmh !== null && !isNaN(drive.avgSpeedKmh)) ? drive.avgSpeedKmh : null,
-            distanceM:    (drive.distanceM   !== null && !isNaN(drive.distanceM))   ? drive.distanceM   : null,
+            avgSpeedKmh:  (drive.avgSpeedKmh  !== null && !isNaN(drive.avgSpeedKmh))  ? drive.avgSpeedKmh  : null,
+            distanceM:    (drive.distanceM    !== null && !isNaN(drive.distanceM))    ? drive.distanceM    : null,
+            maxSpeedKmh:  (drive.maxSpeedKmh  !== null && !isNaN(drive.maxSpeedKmh))  ? drive.maxSpeedKmh  : null,
+            stoppedSec:   (drive.stoppedSec   !== null && !isNaN(drive.stoppedSec))   ? drive.stoppedSec   : null,
             timestamp:    new Date(Number(drive.timestamp) || Date.now()),
           }).catch((err) => log('error', 'tcp.drive.persist_error', { deviceId, err: err.message }));
 

@@ -104,7 +104,16 @@
       "Read(//c/Users/Leonardo/Desktop/Proyecto Argus/argus-web-usuario/src/**)",
       "Read(//c/Users/Leonardo/Desktop/Proyecto Argus/argus_app/**)",
       "Read(//c/Users/Leonardo/Desktop/Proyecto Argus/argus-web-operador/src/**)",
-      "Read(//c/Users/Leonardo/Desktop/Proyecto Argus/argus-web-operador/src/api/**)"
+      "Read(//c/Users/Leonardo/Desktop/Proyecto Argus/argus-web-operador/src/api/**)",
+      "Bash(node -e \"const p = require\\('./package.json'\\); console.log\\(Object.keys\\(p.dependencies\\).filter\\(k => k.includes\\('firebase'\\)\\)\\)\")",
+      "Bash(node -e \"const p = require\\('./package.json'\\); console.log\\(p.dependencies['firebase-admin']\\)\")",
+      "PowerShell(git -C \"c:\\\\Users\\\\Leonardo\\\\Desktop\\\\Proyecto Argus\\\\Argus-IDF\" status --short)",
+      "PowerShell(git -C \"c:\\\\Users\\\\Leonardo\\\\Desktop\\\\Proyecto Argus\\\\Argus-IDF\" diff --stat HEAD)",
+      "PowerShell(git -C \"c:\\\\Users\\\\Leonardo\\\\Desktop\\\\Proyecto Argus\\\\Argus-IDF\" log --oneline -5)",
+      "Bash(ls \"C:\\\\Users\\\\Leonardo\\\\Desktop\\\\Proyecto Argus\\\\Boveda Obsidian\\\\Argus\\\\04-Comm-Protocols\\\\\" 2>/dev/null && echo \"---\" && ls \"C:\\\\Users\\\\Leonardo\\\\Desktop\\\\Proyecto Argus\\\\Boveda Obsidian\\\\Argus\\\\01-Architecture\\\\\" 2>/dev/null)",
+      "Read(//c/Users/Leonardo/Desktop/Proyecto Argus/Boveda Obsidian/Argus/04-Comm-Protocols\" 2>/dev/**)",
+      "Read(//c/Users/Leonardo/Desktop/Proyecto Argus/Boveda Obsidian/Argus/04-Comm-Protocols/**)",
+      "Read(//c/Users/Leonardo/Desktop/Proyecto Argus/Boveda Obsidian/Argus/01-Architecture/**)"
     ],
     "additionalDirectories": [
       "c:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\argus_app",
@@ -132,7 +141,8 @@
       "c:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\Argus-IDF\\components\\drivers",
       "c:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\Argus-IDF\\components\\services",
       "c:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\argus_app\\lib\\services",
-      "c:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\argus-web-operador\\src\\api"
+      "c:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\argus-web-operador\\src\\api",
+      "C:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\Boveda Obsidian\\Argus\\01-Architecture"
     ]
   }
 }
