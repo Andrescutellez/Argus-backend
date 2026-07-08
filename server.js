@@ -63,7 +63,7 @@ const settingsRoutes          = require('./routes/settings');             // Rut
 const { initGeoStream }       = require('./services/geoStreamService'); // WebSocket GPS para Argus Secure
 const { warmCache: warmCrimeCache } = require('./controllers/crimeController'); // Pre-carga ARI cache
 const { warmGeofenceCache } = require('./tcp/geofenceMonitor');                  // Pre-carga geocercas activas
-const { startTcpServer } = require('./tcp/tcpServer'); // Servidor TCP para ESP32
+const { startTcpServer, startTlsServer } = require('./tcp/tcpServer'); // Servidores TCP/TLS para ESP32
 const { setIo } = require('./services/socketService'); // Singleton io para controllers
 const { startWorker } = require('./tcp/queue');        // Worker que escribe batches a MongoDB
 
@@ -185,6 +185,11 @@ startWorker();
 // Le pasamos io para que el servidor TCP pueda emitir eventos WebSocket
 // directamente cuando recibe un paquete GPS válido del ESP32.
 startTcpServer(io);
+
+// Levanta el servidor TLS en TCP_TLS_PORT (9001 por defecto) — canal cifrado paralelo.
+// Si los certificados no existen en certs/, se omite sin crashear y solo queda el TCP plano.
+// Rollback: flashear firmware con TCP_USE_TLS=0 → vuelve a conectar por el puerto 9000.
+startTlsServer(io);
 
 // Pre-carga el cache de criminalidad para que riskMonitor.js pueda calcular
 // ARI desde el primer paquete GPS, sin esperar a que alguien abra la web.

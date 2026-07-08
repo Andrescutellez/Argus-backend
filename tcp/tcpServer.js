@@ -19,6 +19,8 @@
 'use strict';
 
 const net = require('net'); // Módulo nativo de Node.js para sockets TCP crudos
+const tls = require('tls'); // TLS sobre TCP — mismo API de socket, canal cifrado
+const fs  = require('fs');  // Leer certificados del disco al arrancar
 const { log } = require('./logger');
 const { isAllowed, verifySignature } = require('./deviceAuth');
 const { enqueue } = require('./queue');
@@ -44,7 +46,18 @@ const { sendAlarmPush } = require('../services/pushService');
  *   IMPACTO ACTUAL: en un despliegue descuidado, nginx y el servidor TCP
  *   podrían competir por el puerto 80.
  */
-const TCP_PORT = parseInt(process.env.TCP_PORT || '80', 10);
+const TCP_PORT     = parseInt(process.env.TCP_PORT     || '80',   10);
+
+/**
+ * Puerto TLS del servidor TCP. El firmware con TCP_USE_TLS=1 se conecta aquí.
+ * El puerto TCP_PORT (9000) sigue activo en paralelo para rollback inmediato:
+ * si el TLS falla, basta con flashear TCP_USE_TLS=0 en el firmware.
+ */
+const TCP_TLS_PORT = parseInt(process.env.TCP_TLS_PORT || '9001', 10);
+
+/** Paths a los archivos de certificado generados con scripts/gen-tls-cert.js */
+const TLS_KEY_PATH  = process.env.TLS_KEY_PATH  || './certs/key.pem';
+const TLS_CERT_PATH = process.env.TLS_CERT_PATH || './certs/cert.pem';
 
 /**
  * Milisegundos sin datos tras los cuales el servidor cierra la conexión.
@@ -554,10 +567,10 @@ async function persistAlert({ deviceId, type, source, lat, lon, timestamp }) {
  *     para prevenir ataques de memory exhaustion.
  *
  * @param {import('socket.io').Server} io — Instancia de Socket.io para push al frontend.
- * @returns {import('net').Server} — El servidor TCP configurado (sin haber llamado .listen()).
+ * @returns {(socket: import('net').Socket) => void} — Handler reutilizable para net.Server y tls.Server.
  */
-function createTcpServer(io) {
-  const server = net.createServer((socket) => {
+function _makeSocketHandler(io) {
+  return (socket) => {
     // Dirección IP y puerto efímero del cliente (el ESP32).
     // Útil para logs de diagnóstico y para correlacionar eventos de red con eventos de protocolo.
     const remote = `${socket.remoteAddress}:${socket.remotePort}`;
@@ -1089,15 +1102,56 @@ function createTcpServer(io) {
       // 'close' fires after 'error'; cleanup happens there
       log('error', 'tcp.socket.error', { remote, message: err.message });
     });
-  });
+  };
+}
 
-  // ── ERROR DEL SERVIDOR (no de un socket individual) ─────────────────────
-  // Ejemplo: EADDRINUSE si otro proceso ya tiene el puerto TCP_PORT.
-  // Sin este handler, Node.js lanzaría la excepción y crashearía el proceso.
+// ─── SERVIDORES TCP Y TLS ─────────────────────────────────────────────────────
+
+/**
+ * @brief Crea el servidor TCP plano (puerto 9000). Sigue activo como fallback de rollback.
+ *
+ * @param {import('socket.io').Server} io
+ * @returns {import('net').Server}
+ */
+function createTcpServer(io) {
+  const server = net.createServer(_makeSocketHandler(io));
+  // EADDRINUSE si otro proceso ya tiene el puerto.
   server.on('error', (err) => {
     log('error', 'tcp.server.error', { message: err.message });
   });
+  return server;
+}
 
+/**
+ * @brief Crea el servidor TLS (puerto 9001). Cifra el canal; mismo handler que TCP.
+ *
+ * PROPÓSITO:
+ *   Canal paralelo al TCP plano. El firmware con TCP_USE_TLS=1 se conecta aquí.
+ *   tls.TLSSocket extiende net.Socket — el handler es 100% compatible.
+ *   Si los certificados no existen, retorna null y loguea el motivo sin crashear.
+ *
+ * ROLLBACK:
+ *   Para revertir: flashear firmware con TCP_USE_TLS=0. El puerto 9000 nunca se toca.
+ *
+ * @param {import('socket.io').Server} io
+ * @returns {import('tls').Server | null} — null si los certificados no están disponibles.
+ */
+function createTlsServer(io) {
+  let key, cert;
+  try {
+    key  = fs.readFileSync(TLS_KEY_PATH);
+    cert = fs.readFileSync(TLS_CERT_PATH);
+  } catch (err) {
+    log('error', 'tls.server.cert_missing', {
+      err:  err.message,
+      hint: 'Ejecuta: node scripts/gen-tls-cert.js y copia certs/ al servidor',
+    });
+    return null;
+  }
+  const server = tls.createServer({ key, cert }, _makeSocketHandler(io));
+  server.on('error', (err) => {
+    log('error', 'tls.server.error', { message: err.message });
+  });
   return server;
 }
 
@@ -1204,6 +1258,41 @@ function startTcpServer(io) {
   return server;
 }
 
+/**
+ * @brief Levanta el servidor TLS escuchando en TCP_TLS_PORT en todas las interfaces.
+ *
+ * PROPÓSITO:
+ *   Canal cifrado paralelo al TCP plano. Se llama desde server.js DESPUÉS de
+ *   startTcpServer(), así el servidor arrancha aunque los certificados falten.
+ *
+ * FLUJO:
+ *   1. createTlsServer() — carga cert/key. Si fallan, retorna null y se loguea.
+ *   2. server.listen() en TCP_TLS_PORT ('0.0.0.0').
+ *   3. Retorna el servidor TLS (o null si los certs no estaban disponibles).
+ *
+ * ROLLBACK:
+ *   Eliminar la llamada a startTlsServer() en server.js o no poner los .pem en
+ *   certs/ — el servidor TCP plano en 9000 sigue corriendo sin ningún cambio.
+ *
+ * @param {import('socket.io').Server} io
+ * @returns {import('tls').Server | null}
+ */
+function startTlsServer(io) {
+  ioRef = io; // idempotente si startTcpServer() ya la seteó
+
+  const server = createTlsServer(io);
+  if (!server) {
+    log('warn', 'tls.server.skipped', { reason: 'certificados no disponibles — solo TCP plano activo' });
+    return null;
+  }
+
+  server.listen(TCP_TLS_PORT, '0.0.0.0', () => {
+    log('info', 'tls.server.start', { port: TCP_TLS_PORT });
+  });
+
+  return server;
+}
+
 // ─── EXPORTACIONES ────────────────────────────────────────────────────────────
 /**
  * @brief Retorna la instancia de Socket.io guardada al arrancar el servidor TCP.
@@ -1222,7 +1311,7 @@ function getIo() {
 
 // connectedDevices se exporta para que deviceController.js pueda verificar
 // si un device está actualmente conectado (para responder 200 vs 202 en /status).
-module.exports = { startTcpServer, sendCommand, connectedDevices, getIo };
+module.exports = { startTcpServer, startTlsServer, sendCommand, connectedDevices, getIo };
 
 
 /* ═══════════════════════════════════════════════════════════
