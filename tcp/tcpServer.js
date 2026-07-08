@@ -1148,7 +1148,9 @@ function createTlsServer(io) {
     });
     return null;
   }
-  const server = tls.createServer({ key, cert }, _makeSocketHandler(io));
+  // minVersion: 'TLSv1' — acepta cualquier versión TLS que el A7670 negocie.
+  // El firmware configura sslversion=0 (all); sin este flag Node.js 20 rechaza TLS < 1.2.
+  const server = tls.createServer({ key, cert, minVersion: 'TLSv1' }, _makeSocketHandler(io));
   server.on('error', (err) => {
     log('error', 'tls.server.error', { message: err.message });
   });
