@@ -1152,6 +1152,14 @@ function createTlsServer(io) {
   server.on('error', (err) => {
     log('error', 'tls.server.error', { message: err.message });
   });
+  // Loguear conexiones TCP crudas (antes del handshake TLS) y errores de handshake.
+  // Sin esto, si el A7670 conecta pero falla el handshake SSL, no aparece nada en los logs.
+  server.on('connection', (socket) => {
+    log('info', 'tls.raw_tcp_connect', { remote: `${socket.remoteAddress}:${socket.remotePort}` });
+  });
+  server.on('tlsClientError', (err, socket) => {
+    log('error', 'tls.handshake_error', { message: err.message, remote: socket?.remoteAddress });
+  });
   return server;
 }
 
