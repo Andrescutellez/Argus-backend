@@ -73,6 +73,17 @@ const { startWorker } = require('./tcp/queue');        // Worker que escribe bat
 // subyacente, no a la app de Express directamente. Si se usara app.listen()
 // no habría forma de pasarle ese servidor a Socket.io.
 const app = express();
+
+// trust proxy = 1: Express confía en el PRIMER proxy de la cadena (nginx en
+// esta misma VM). Necesario desde la migración 2026-07-09: nginx agrega
+// X-Forwarded-For, y sin esto express-rate-limit lanza
+// ERR_ERL_UNEXPECTED_X_FORWARDED_FOR en cada request y el rate limiting de
+// comandos falla. Además req.ip pasa a ser la IP real del cliente (no la de
+// nginx), que es lo que el rate limiter debe usar como llave.
+// Valor 1 (no true): confiar en exactamente un salto — un cliente malicioso
+// no puede falsificar su IP inyectando su propio X-Forwarded-For.
+app.set('trust proxy', 1);
+
 const httpServer = http.createServer(app);
 
 // ⚠️ initGeoStream DEBE registrar su listener 'upgrade' ANTES que socket.io.

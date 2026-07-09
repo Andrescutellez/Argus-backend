@@ -72,16 +72,17 @@ console.log(`
     Clave:        ${keyPath}
     Certificado:  ${certPath}
 
-Próximos pasos:
-  1. Copiar certs/key.pem y certs/cert.pem al servidor GCP:
-       scp certs/key.pem certs/cert.pem usuario@34.69.219.193:~/Argus\\ Backend/certs/
+⚠️  NOTA (2026-07-09): en PRODUCCIÓN ya NO se usan certs self-signed.
+    El servidor usa Let's Encrypt (/etc/letsencrypt/live/argussecure.online/).
+    Este script queda solo para desarrollo/pruebas locales.
 
-  2. En GCP: abrir el puerto 9001 en el firewall VPC
-       (igual que abriste el 9000, pero con TCP_TLS_PORT=9001)
+Próximos pasos (solo entorno local):
+  1. Configurar TCP_TLS_PORT=9001, TLS_KEY_PATH y TLS_CERT_PATH en .env local
 
-  3. Configurar TCP_TLS_PORT=9001, TLS_KEY_PATH y TLS_CERT_PATH en .env del servidor
-
-  4. Flashear firmware con TCP_USE_TLS=1 en a7670_driver.h
+  2. Producción: apuntar TLS_KEY_PATH/TLS_CERT_PATH del .env del servidor a
+       /etc/letsencrypt/live/argussecure.online/privkey.pem
+       /etc/letsencrypt/live/argussecure.online/fullchain.pem
+     y reiniciar: pm2 restart argus-api
 
 ⚠️  NUNCA subir key.pem ni cert.pem a Git — ya están en .gitignore
 `);
