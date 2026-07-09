@@ -99,6 +99,15 @@ const DeviceStateSchema = new Schema(
     cgatt: { type: Boolean, default: null },
 
     /**
+     * Si el canal TCP del device está cifrado (TLS vía API CCH del A7670, 2026-07-09).
+     * true  → sesión CCH TLS activa (puerto 9001).
+     * false → TCP plano (fallback en runtime tras fallos de TLS, o TCP_USE_TLS=0).
+     * null  → firmware pre-TLS que manda DIAG de 3 campos — distinto de false
+     *         para que la UI no muestre "sin cifrar" como falso negativo.
+     */
+    tls: { type: Boolean, default: null },
+
+    /**
      * Cuándo llegó el último frame DIAG de este device.
      * Permite detectar firmware antiguo (sin DIAG) vs firmware nuevo sin conexión reciente.
      */

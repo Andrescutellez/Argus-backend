@@ -740,7 +740,10 @@ function _makeSocketHandler(io) {
         // Formato: "DIAG|deviceId|rssi|cgatt"
         if (line.startsWith('DIAG|')) {
           const parts = line.split('|');
-          if (parts.length === 4) {
+          // 4 partes = firmware pre-TLS ("DIAG|id|rssi|cgatt"); 5 partes agrega
+          // el flag tls ("...|cgatt|tls", 2026-07-09). Aceptar ambos formatos
+          // para no romper devices en campo con firmware viejo.
+          if (parts.length === 4 || parts.length === 5) {
             const diagDeviceId = parts[1];
             // Verificar que el device esté registrado (whitelist), pero no requerir
             // que el deviceId del scope ya esté seteado — el DIAG llega antes del
@@ -748,19 +751,22 @@ function _makeSocketHandler(io) {
             if (await isAllowed(diagDeviceId)) {
               const rssi  = parseInt(parts[2], 10);
               const cgatt = parseInt(parts[3], 10) === 1;
+              // tls: null cuando el firmware no reporta el campo (pre-2026-07-09) —
+              // distinto de false ("reportó canal plano") para no mostrar falsos negativos.
+              const tls   = parts.length === 5 ? parseInt(parts[4], 10) === 1 : null;
               const now   = new Date();
 
               DeviceState.findOneAndUpdate(
                 { deviceId: diagDeviceId },
-                { rssi, cgatt, lastDiagAt: now },
+                { rssi, cgatt, tls, lastDiagAt: now },
                 { upsert: true },
               ).catch((err) => log('error', 'tcp.diag.persist_error', { deviceId: diagDeviceId, err: err.message }));
 
               if (io) {
-                io.to(`device:${diagDeviceId}`).emit('device:diag', { deviceId: diagDeviceId, rssi, cgatt });
+                io.to(`device:${diagDeviceId}`).emit('device:diag', { deviceId: diagDeviceId, rssi, cgatt, tls });
               }
 
-              log('info', 'tcp.diag.accepted', { deviceId: diagDeviceId, rssi, cgatt });
+              log('info', 'tcp.diag.accepted', { deviceId: diagDeviceId, rssi, cgatt, tls });
               // El firmware no espera respuesta al DIAG — no se hace socket.write()
             } else {
               log('warn', 'tcp.diag.unknown_device', { remote, deviceId: parts[1] });
