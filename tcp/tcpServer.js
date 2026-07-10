@@ -582,12 +582,12 @@ function _makeSocketHandler(io) {
     // agotando los recursos del proceso a lo largo del tiempo.
     socket.setTimeout(INACTIVITY_TIMEOUT_MS);
 
-    // keepAlive envía paquetes TCP vacíos cada 30s para detectar conexiones muertas
-    // a nivel de kernel (no solo de protocolo). Útil cuando el carrier de red móvil
-    // descarta silenciosamente la conexión sin enviar FIN/RST.
-    // El check opcional (socket.setKeepAlive &&) existe por si en algún entorno de test
-    // se mockea el socket sin implementar todos sus métodos.
-    socket.setKeepAlive && socket.setKeepAlive(true, 30000);
+    // keepAlive envía sondas TCP vacías para detectar conexiones muertas y para
+    // mantener viva la sesión TLS ante el idle-timeout del carrier móvil (Tigo ~20s).
+    // initialDelay=10 000 ms: primera sonda a los 10s de inactividad, antes de que
+    // Tigo cierre el socket. Sin esto, el socket persiste solo mientras el ESP32
+    // envíe datos; en indoor sin GPS fix puede haber >20s de silencio → RST del carrier.
+    socket.setKeepAlive && socket.setKeepAlive(true, 10000);
 
     // Buffer acumulador de datos parciales.
     // TCP es un protocolo de stream, no de mensajes. Un chunk puede contener

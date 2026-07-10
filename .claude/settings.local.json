@@ -113,7 +113,9 @@
       "Bash(ls \"C:\\\\Users\\\\Leonardo\\\\Desktop\\\\Proyecto Argus\\\\Boveda Obsidian\\\\Argus\\\\04-Comm-Protocols\\\\\" 2>/dev/null && echo \"---\" && ls \"C:\\\\Users\\\\Leonardo\\\\Desktop\\\\Proyecto Argus\\\\Boveda Obsidian\\\\Argus\\\\01-Architecture\\\\\" 2>/dev/null)",
       "Read(//c/Users/Leonardo/Desktop/Proyecto Argus/Boveda Obsidian/Argus/04-Comm-Protocols\" 2>/dev/**)",
       "Read(//c/Users/Leonardo/Desktop/Proyecto Argus/Boveda Obsidian/Argus/04-Comm-Protocols/**)",
-      "Read(//c/Users/Leonardo/Desktop/Proyecto Argus/Boveda Obsidian/Argus/01-Architecture/**)"
+      "Read(//c/Users/Leonardo/Desktop/Proyecto Argus/Boveda Obsidian/Argus/01-Architecture/**)",
+      "Skill(mobile-design)",
+      "Skill(mobile-design:*)"
     ],
     "additionalDirectories": [
       "c:\\Users\\Leonardo\\Desktop\\Proyecto Argus\\argus_app",
