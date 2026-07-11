@@ -58,6 +58,7 @@ const driveRoutes             = require('./routes/drive');             // Rutas 
 const crimeRoutes             = require('./routes/crime');             // Rutas REST criminalidad — hurtos motos/autos por localidad
 const geofenceRoutes          = require('./routes/geofence');           // Rutas REST geocercas de estacionamiento
 const incidentRoutes          = require('./routes/incident');            // Rutas REST incidentes comunitarios
+const otaRoutes               = require('./routes/ota');                  // Rutas REST OTA firmware
 const secureRoomRoutes        = require('./routes/secureRoom');          // Rutas REST sala de recuperación Argus Secure
 const settingsRoutes          = require('./routes/settings');             // Rutas REST configuración global
 const { initGeoStream }       = require('./services/geoStreamService'); // WebSocket GPS para Argus Secure
@@ -268,6 +269,7 @@ app.use('/api/geofence',      geofenceRoutes);
 app.use('/api/incidents',     incidentRoutes);
 app.use('/api/secure/rooms', secureRoomRoutes);
 app.use('/api/settings',     settingsRoutes);
+app.use('/api/ota',          otaRoutes);
 
 // ─── 11. MANEJADOR 404 CATCH-ALL ──────────────────────────────────────────────
 // En Express 5 los middlewares de error deben registrarse después de todas
