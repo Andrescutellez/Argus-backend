@@ -35,6 +35,11 @@ const DRIVE_MEDIUM_ACCEL_G = 0.35;  // 0.35–0.6g → evento medio (penaliza me
 // peakGyroMag (°/s): curva agresiva o cambio brusco de dirección.
 const DRIVE_HARD_GYRO_DPS  = 50.0;  // > 50°/s → curva agresiva
 
+// Velocidad mínima para considerar un evento válido. Por debajo de este umbral,
+// el MPU6050 detecta ruido (moto quieta, lavado, persona sentada) y el GPS
+// salta dentro de su margen de error generando falsos positivos de curva/maniobra.
+const DRIVE_MIN_SPEED_KMH      = 10;
+
 // Velocidad configurable de exceso (km/h). En el futuro vendrá del perfil del usuario.
 const DEFAULT_SPEED_LIMIT_KMH = 80;
 // Penalización por km/h por encima del límite.
@@ -77,6 +82,9 @@ const P4_MAX_VARIABILITY       = 5;
  * Usa umbrales más altos que el firmware (calibrado para robo, no conducción).
  */
 function drivingHardEvents(session) {
+  // Por debajo de DRIVE_MIN_SPEED_KMH el MPU detecta ruido (moto quieta, lavado,
+  // persona sentada) y el GPS salta dentro de su margen de error — no hay maniobra real.
+  if ((session.avgSpeedKmh ?? 0) < DRIVE_MIN_SPEED_KMH) return 0;
   let count = 0;
   if (session.peakAccelDev >= DRIVE_HARD_ACCEL_G)   count += 1;  // frenada/aceleración brusca
   if (session.peakGyroMag  >= DRIVE_HARD_GYRO_DPS)  count += 1;  // curva agresiva
@@ -84,11 +92,13 @@ function drivingHardEvents(session) {
 }
 
 function drivingMediumEvents(session) {
+  if ((session.avgSpeedKmh ?? 0) < DRIVE_MIN_SPEED_KMH) return 0;
   if (session.peakAccelDev >= DRIVE_MEDIUM_ACCEL_G && session.peakAccelDev < DRIVE_HARD_ACCEL_G) return 1;
   return 0;
 }
 
 function isCurveAggressive(session) {
+  if ((session.avgSpeedKmh ?? 0) < DRIVE_MIN_SPEED_KMH) return false;
   return session.peakGyroMag >= DRIVE_HARD_GYRO_DPS;
 }
 
