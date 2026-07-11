@@ -61,6 +61,7 @@ const incidentRoutes          = require('./routes/incident');            // Ruta
 const otaRoutes               = require('./routes/ota');                  // Rutas REST OTA firmware
 const secureRoomRoutes        = require('./routes/secureRoom');          // Rutas REST sala de recuperación Argus Secure
 const settingsRoutes          = require('./routes/settings');             // Rutas REST configuración global
+const communityRoutes         = require('./routes/communities');           // Rutas REST comunidades Argus
 const { initGeoStream }       = require('./services/geoStreamService'); // WebSocket GPS para Argus Secure
 const { warmCache: warmCrimeCache } = require('./controllers/crimeController'); // Pre-carga ARI cache
 const { warmGeofenceCache } = require('./tcp/geofenceMonitor');                  // Pre-carga geocercas activas
@@ -166,6 +167,16 @@ io.on('connection', (socket) => {
   socket.on('incident:leave', (incidentId) => {
     if (incidentId) socket.leave(`incident:${incidentId}`);
   });
+
+  // Al conectar, el cliente envía sus communityIds para recibir posts y alertas en tiempo real.
+  socket.on('community:join', (communityIds) => {
+    if (!Array.isArray(communityIds)) return;
+    communityIds.forEach(id => { if (id) socket.join(`community:${id}`); });
+  });
+
+  socket.on('community:leave', (communityId) => {
+    if (communityId) socket.leave(`community:${communityId}`);
+  });
 });
 
 // ─── 6. PUERTO HTTP ───────────────────────────────────────────────────────────
@@ -270,6 +281,7 @@ app.use('/api/incidents',     incidentRoutes);
 app.use('/api/secure/rooms', secureRoomRoutes);
 app.use('/api/settings',     settingsRoutes);
 app.use('/api/ota',          otaRoutes);
+app.use('/api/communities',  communityRoutes);
 
 // ─── 11. MANEJADOR 404 CATCH-ALL ──────────────────────────────────────────────
 // En Express 5 los middlewares de error deben registrarse después de todas

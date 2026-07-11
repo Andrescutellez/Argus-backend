@@ -29,7 +29,8 @@ const { checkGeofence } = require('./geofenceMonitor');   // Geocerca: detecta s
 const Alert = require('../models/Alert');
 const DeviceState = require('../models/DeviceState');
 const DriveMetrics = require('../models/DriveMetrics');
-const { sendAlarmPush } = require('../services/pushService');
+const { sendAlarmPush }       = require('../services/pushService');
+const { notifyCommunities }  = require('../services/communityAlertService');
 
 // ─── CONSTANTES DE CONFIGURACIÓN ─────────────────────────────────────────────
 
@@ -527,6 +528,9 @@ async function persistAlert({ deviceId, type, source, lat, lon, timestamp }) {
   if (type === 'STATE_ALERT') {
     sendAlarmPush(deviceId, lat, lon).catch((err) =>
       log('error', 'push.alarm_error', { deviceId, err: err.message }),
+    );
+    notifyCommunities(deviceId, lat, lon).catch((err) =>
+      log('error', 'community.alert_error', { deviceId, err: err.message }),
     );
   }
 }
