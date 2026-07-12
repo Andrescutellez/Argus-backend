@@ -26,17 +26,17 @@ const getMe = async (req, res) => {
 const updateMe = async (req, res) => {
   const { displayName, bio, city, isPublic } = req.body ?? {};
 
-  // Validaciones básicas de longitud
-  if (displayName !== undefined && (typeof displayName !== 'string' || displayName.trim().length > 80)) {
-    return res.status(400).json({ message: 'displayName debe tener máximo 80 caracteres.' });
+  // Validaciones básicas de longitud (null = borrar campo, undefined = no enviar)
+  if (typeof displayName === 'string' && displayName.trim().length > 80) {
+    return res.status(400).json({ message: 'El nombre visible debe tener máximo 80 caracteres.' });
   }
-  if (bio !== undefined && (typeof bio !== 'string' || bio.length > 300)) {
-    return res.status(400).json({ message: 'bio debe tener máximo 300 caracteres.' });
+  if (typeof bio === 'string' && bio.length > 300) {
+    return res.status(400).json({ message: 'La biografía debe tener máximo 300 caracteres.' });
   }
-  if (city !== undefined && (typeof city !== 'string' || city.trim().length > 100)) {
-    return res.status(400).json({ message: 'city debe tener máximo 100 caracteres.' });
+  if (typeof city === 'string' && city.trim().length > 100) {
+    return res.status(400).json({ message: 'La ciudad debe tener máximo 100 caracteres.' });
   }
-  if (isPublic !== undefined && typeof isPublic !== 'boolean') {
+  if (isPublic !== undefined && isPublic !== null && typeof isPublic !== 'boolean') {
     return res.status(400).json({ message: 'isPublic debe ser boolean.' });
   }
 
