@@ -7,6 +7,7 @@ const CommunityPost       = require('../models/CommunityPost');
 const SocialProfile       = require('../models/SocialProfile');
 const { getPool }         = require('../config/postgres');
 const { getIo }           = require('../services/socketService');
+const { getAdmin }        = require('../config/firebase');
 
 // ─── Helper ────────────────────────────────────────────────────────────────────
 
@@ -245,6 +246,32 @@ const createPost = async (req, res) => {
 
   // Notifica en tiempo real a los miembros del room
   getIo()?.to(`community:${communityId}`).emit('community:post', post);
+
+  // FCM push fire-and-forget (no bloquea la respuesta)
+  setImmediate(async () => {
+    try {
+      const admin = getAdmin();
+      if (!admin) return;
+      const tokens = await CommunityMember.getFcmTokensOfCommunity(communityId, req.user.sub);
+      if (!tokens.length) return;
+      const { rows } = await getPool().query('SELECT name FROM communities WHERE id=$1', [communityId]);
+      const title = rows[0]?.name ?? 'Argus Comunidades';
+      const body  = `${post.author_name ?? 'Alguien'}: ${(post.content ?? '').slice(0, 120)}`;
+      const chunks = [];
+      for (let i = 0; i < tokens.length; i += 500) chunks.push(tokens.slice(i, i + 500));
+      for (const chunk of chunks) {
+        await admin.messaging().sendEachForMulticast({
+          tokens: chunk,
+          notification: { title, body },
+          data: { type: 'COMMUNITY_POST', communityId, postId: String(post.id) },
+          android: { priority: 'normal' },
+          apns: { payload: { aps: { sound: 'default' } } },
+        }).catch(() => {});
+      }
+    } catch (err) {
+      console.error('[Community] FCM post push error:', err.message);
+    }
+  });
 
   return res.status(201).json(post);
 };
