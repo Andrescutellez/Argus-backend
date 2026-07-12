@@ -1,6 +1,6 @@
 'use strict';
 const { Router } = require('express');
-const auth = require('../middleware/auth');
+const { authenticate } = require('../middleware/auth');
 const {
   getMe, updateMe, changeUsername, checkUsername, getPublic,
 } = require('../controllers/profileController');
@@ -8,7 +8,7 @@ const {
 const router = Router();
 
 // Todas las rutas requieren autenticación
-router.use(auth);
+router.use(authenticate);
 
 // IMPORTANTE: rutas estáticas ANTES que /:username para evitar conflictos
 router.get('/me',                getMe);
