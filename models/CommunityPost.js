@@ -12,9 +12,13 @@ async function create({ communityId, authorId, type = 'GENERAL', content, mediaU
 
 async function listByCommunity(communityId, { limit = 30, before = null } = {}) {
   const { rows } = await getPool().query(
-    `SELECT p.*, SPLIT_PART(u.email, '@', 1) AS author_name
+    `SELECT p.*,
+       COALESCE(sp.display_name, sp.username, SPLIT_PART(u.email, '@', 1)) AS author_name,
+       sp.username  AS author_username,
+       sp.avatar_url AS author_avatar
      FROM community_posts p
      JOIN users u ON u.id = p.author_id
+     LEFT JOIN social_profiles sp ON sp.user_id = u.id
      WHERE p.community_id = $1
        AND ($2::timestamptz IS NULL OR p.created_at < $2)
      ORDER BY p.created_at DESC
@@ -27,10 +31,14 @@ async function listByCommunity(communityId, { limit = 30, before = null } = {}) 
 /** Feed multi-comunidad: posts de todas las comunidades a las que pertenece el usuario. */
 async function feedForUser(userId, { limit = 40, before = null } = {}) {
   const { rows } = await getPool().query(
-    `SELECT p.*, c.name AS community_name, SPLIT_PART(u.email, '@', 1) AS author_name
+    `SELECT p.*, c.name AS community_name,
+       COALESCE(sp.display_name, sp.username, SPLIT_PART(u.email, '@', 1)) AS author_name,
+       sp.username   AS author_username,
+       sp.avatar_url AS author_avatar
      FROM community_posts p
      JOIN communities c ON c.id = p.community_id
      JOIN users u ON u.id = p.author_id
+     LEFT JOIN social_profiles sp ON sp.user_id = u.id
      WHERE p.community_id IN (
        SELECT community_id FROM community_members WHERE user_id=$1 AND status='ACTIVE'
      )
@@ -44,7 +52,14 @@ async function feedForUser(userId, { limit = 40, before = null } = {}) {
 
 async function getById(id) {
   const { rows } = await getPool().query(
-    `SELECT p.*, SPLIT_PART(u.email, '@', 1) AS author_name FROM community_posts p JOIN users u ON u.id=p.author_id WHERE p.id=$1`,
+    `SELECT p.*,
+       COALESCE(sp.display_name, sp.username, SPLIT_PART(u.email, '@', 1)) AS author_name,
+       sp.username   AS author_username,
+       sp.avatar_url AS author_avatar
+     FROM community_posts p
+     JOIN users u ON u.id = p.author_id
+     LEFT JOIN social_profiles sp ON sp.user_id = u.id
+     WHERE p.id = $1`,
     [id],
   );
   return rows[0] ?? null;

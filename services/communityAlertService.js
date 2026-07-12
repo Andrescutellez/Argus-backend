@@ -22,9 +22,12 @@ async function notifyCommunities(deviceId, lat, lon) {
   try {
     // 1. Obtener dueño + preferencias de privacidad
     const { rows: ownerRows } = await getPool().query(
-      `SELECT u.id, SPLIT_PART(u.email, '@', 1) AS full_name, u.share_theft_with_communities, u.theft_location_visibility
+      `SELECT u.id,
+         COALESCE(sp.display_name, sp.username, SPLIT_PART(u.email, '@', 1)) AS full_name,
+         u.share_theft_with_communities, u.theft_location_visibility
        FROM users u
        JOIN motos m ON m.owner_id = u.id
+       LEFT JOIN social_profiles sp ON sp.user_id = u.id
        WHERE m.device_id = $1`,
       [deviceId],
     );

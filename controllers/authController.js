@@ -32,10 +32,11 @@
 
 'use strict';
 
-const bcrypt       = require('bcryptjs');
-const jwt          = require('jsonwebtoken');
-const User         = require('../models/User');
-const Subscription = require('../models/Subscription');
+const bcrypt        = require('bcryptjs');
+const jwt           = require('jsonwebtoken');
+const User          = require('../models/User');
+const Subscription  = require('../models/Subscription');
+const SocialProfile = require('../models/SocialProfile');
 
 const BCRYPT_ROUNDS = 12;
 const SECRET        = process.env.JWT_SECRET;
@@ -106,6 +107,11 @@ const register = async (req, res) => {
 
     // Todo usuario nuevo arranca en FREEMIUM
     await Subscription.createSubscription(user.id);
+
+    // Crear perfil social automáticamente usando el prefijo del email como username base
+    await SocialProfile.create(user.id, email).catch(err =>
+      console.error('[AUTH] Error creando perfil social:', err.message),
+    );
 
     // Asociar dispositivo si se proporcionó en el registro
     if (deviceId) await User.addDevice(user.id, deviceId);
