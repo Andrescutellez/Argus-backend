@@ -55,16 +55,22 @@ const getCommunity = async (req, res) => {
   const community = await Community.getById(req.params.communityId);
   if (!community) return res.status(404).json({ message: 'Comunidad no encontrada' });
 
+  // Rol del usuario actual en la comunidad (null si no es miembro)
+  const membership = await CommunityMember.getRole(community.id, req.user.sub);
+
   // Para comunidades privadas exige membresía activa
   if (community.privacy === 'PRIVADA') {
-    const m = await CommunityMember.getRole(community.id, req.user.sub);
-    if (!m || m.status !== 'ACTIVE') {
+    if (!membership || membership.status !== 'ACTIVE') {
       return res.status(403).json({ message: 'Comunidad privada' });
     }
   }
 
   const members = await CommunityMember.listMembers(community.id, { limit: 10 });
-  return res.json({ ...community, members });
+  return res.json({
+    ...community,
+    members,
+    role: membership?.status === 'ACTIVE' ? membership.role : null,
+  });
 };
 
 const updateCommunity = async (req, res) => {
