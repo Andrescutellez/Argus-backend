@@ -4,6 +4,7 @@ const Community           = require('../models/Community');
 const CommunityMember     = require('../models/CommunityMember');
 const CommunityInvitation = require('../models/CommunityInvitation');
 const CommunityPost       = require('../models/CommunityPost');
+const SocialProfile       = require('../models/SocialProfile');
 const { getPool }         = require('../config/postgres');
 const { getIo }           = require('../services/socketService');
 
@@ -133,6 +134,36 @@ const listMembers = async (req, res) => {
     offset: +(req.query.offset ?? 0),
   });
   return res.json(members);
+};
+
+/** POST /:communityId/members — admin añade a un usuario directamente por username. */
+const addMember = async (req, res) => {
+  const { communityId } = req.params;
+  const { username } = req.body ?? {};
+  if (!username?.trim()) return res.status(400).json({ message: 'username requerido' });
+
+  if (!await assertAdmin(communityId, req.user.sub, res)) return;
+
+  // Resolver username → userId
+  const profile = await SocialProfile.findByUsername(username.trim());
+  if (!profile) return res.status(404).json({ message: 'Usuario no encontrado' });
+
+  // Evitar añadirse a uno mismo si ya es admin
+  const existing = await CommunityMember.getRole(communityId, profile.user_id);
+  if (existing?.status === 'ACTIVE') {
+    return res.status(409).json({ message: 'El usuario ya es miembro de esta comunidad' });
+  }
+
+  await CommunityMember.add(communityId, profile.user_id, 'MEMBER');
+  await Community.incrementMemberCount(communityId, 1);
+
+  return res.status(201).json({
+    user_id:      profile.user_id,
+    username:     profile.username,
+    display_name: profile.display_name,
+    avatar_url:   profile.avatar_url,
+    role:         'MEMBER',
+  });
 };
 
 const updateMemberRole = async (req, res) => {
@@ -304,7 +335,7 @@ const updateCommunitySettings = async (req, res) => {
 module.exports = {
   createCommunity, getMyCommunities, getPublicCommunities, getCommunity,
   updateCommunity, deleteCommunity,
-  joinCommunity, leaveCommunity, listMembers, updateMemberRole, removeMember,
+  joinCommunity, leaveCommunity, addMember, listMembers, updateMemberRole, removeMember,
   createInvitation, useInvitation, listInvitations, revokeInvitation,
   createPost, getCommunityFeed, getMyFeed, deletePost,
   getPrivacyPrefs, updatePrivacyPrefs, updateCommunitySettings,

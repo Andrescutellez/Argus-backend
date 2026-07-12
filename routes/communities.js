@@ -25,6 +25,7 @@ router.delete('/:communityId',  c.deleteCommunity);
 
 // ── Membresía ────────────────────────────────────────────────────────────────
 router.post  ('/:communityId/join',                        c.joinCommunity);
+router.post  ('/:communityId/members',                     c.addMember);
 router.delete('/:communityId/leave',                       c.leaveCommunity);
 router.get   ('/:communityId/members',                     c.listMembers);
 router.patch ('/:communityId/members/:targetUserId/role',  c.updateMemberRole);
