@@ -29,7 +29,7 @@ async function getRole(communityId, userId) {
 
 async function listMembers(communityId, { limit = 50, offset = 0 } = {}) {
   const { rows } = await getPool().query(
-    `SELECT cm.user_id, cm.role, cm.joined_at, u.full_name, u.avatar_url
+    `SELECT cm.user_id, cm.role, cm.joined_at, SPLIT_PART(u.email, '@', 1) AS display_name
      FROM community_members cm
      JOIN users u ON u.id = cm.user_id
      WHERE cm.community_id = $1 AND cm.status = 'ACTIVE'
