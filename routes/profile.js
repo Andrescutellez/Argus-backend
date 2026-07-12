@@ -2,7 +2,7 @@
 const { Router } = require('express');
 const { authenticate } = require('../middleware/auth');
 const {
-  getMe, updateMe, changeUsername, checkUsername, getPublic,
+  getMe, updateMe, changeUsername, checkUsername, getPublic, searchProfiles,
 } = require('../controllers/profileController');
 
 const router = Router();
@@ -15,6 +15,7 @@ router.get('/me',                getMe);
 router.patch('/me',              updateMe);
 router.patch('/me/username',     changeUsername);
 router.get('/check/:username',   checkUsername);
+router.get('/search',            searchProfiles);
 
 // Ruta paramétrica al final
 router.get('/:username',         getPublic);

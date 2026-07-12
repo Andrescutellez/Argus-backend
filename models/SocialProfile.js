@@ -178,6 +178,37 @@ async function upsert(userId, email) {
   return create(userId, email);
 }
 
+/**
+ * Busca perfiles públicos por username o display_name.
+ * Solo retorna perfiles con is_public=true.
+ * @param {string} query  Texto a buscar (mínimo 2 caracteres).
+ * @param {string} excludeUserId  userId a excluir (para no mostrarte a ti mismo).
+ * @param {number} limit  Máximo de resultados (default 10).
+ */
+async function search(query, excludeUserId = null, limit = 10) {
+  const term = `%${query.toLowerCase()}%`;
+  const { rows } = await getPool().query(
+    `SELECT user_id, username, display_name, bio, city, avatar_url, argus_verified, social_status, created_at
+     FROM social_profiles
+     WHERE is_public = true
+       AND social_status = 'ACTIVE'
+       AND ($2::uuid IS NULL OR user_id <> $2)
+       AND (
+         LOWER(username)     LIKE $1 OR
+         LOWER(display_name) LIKE $1
+       )
+     ORDER BY
+       CASE WHEN LOWER(username) = $3 THEN 0
+            WHEN LOWER(username) LIKE $1 THEN 1
+            ELSE 2
+       END,
+       username
+     LIMIT $4`,
+    [term, excludeUserId, query.toLowerCase(), limit],
+  );
+  return rows;
+}
+
 module.exports = {
   findByUserId,
   findByUsername,
@@ -186,5 +217,6 @@ module.exports = {
   changeUsername,
   isUsernameAvailable,
   upsert,
+  search,
   isValidUsername,
 };

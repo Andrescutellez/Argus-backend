@@ -129,4 +129,26 @@ const getPublic = async (req, res) => {
   }
 };
 
-module.exports = { getMe, updateMe, changeUsername, checkUsername, getPublic };
+/**
+ * GET /api/profile/search?q=texto
+ * Busca perfiles públicos por username o display_name.
+ * Solo retorna perfiles públicos y activos.
+ * El propio usuario queda excluido de los resultados.
+ * Query param: q (mínimo 2 caracteres).
+ */
+const searchProfiles = async (req, res) => {
+  const q = (req.query.q ?? '').trim();
+  if (q.length < 2) {
+    return res.json([]);
+  }
+
+  try {
+    const results = await SocialProfile.search(q, req.user.sub, 10);
+    return res.json(results);
+  } catch (err) {
+    console.error('[Profile] search error:', err.message);
+    return res.status(500).json({ message: 'Error interno del servidor' });
+  }
+};
+
+module.exports = { getMe, updateMe, changeUsername, checkUsername, getPublic, searchProfiles };
