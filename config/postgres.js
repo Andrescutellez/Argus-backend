@@ -246,6 +246,29 @@ async function initPostgres() {
     ON CONFLICT (key) DO NOTHING
   `);
 
+  // Migración: unicidad (user_id, placa) en motos — idempotente.
+  // Primero elimina duplicados conservando el registro más antiguo por usuario+placa,
+  // luego crea el índice único parcial (WHERE placa IS NOT NULL para permitir motos sin placa).
+  await pool.query(`
+    DO $$
+    BEGIN
+      DELETE FROM motos
+      WHERE placa IS NOT NULL
+        AND id NOT IN (
+          SELECT DISTINCT ON (user_id, placa) id
+          FROM motos
+          WHERE placa IS NOT NULL
+          ORDER BY user_id, placa, created_at ASC
+        );
+
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_indexes WHERE indexname = 'motos_user_placa_uidx'
+      ) THEN
+        CREATE UNIQUE INDEX motos_user_placa_uidx ON motos(user_id, placa) WHERE placa IS NOT NULL;
+      END IF;
+    END $$
+  `);
+
   console.log('[PG] Schema listo (users, user_devices, motos, devices, subscriptions, audit_log, manufactured_devices, parking_geofences, system_settings)');
 }
 

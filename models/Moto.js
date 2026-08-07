@@ -20,11 +20,28 @@ const { getPool } = require('../config/postgres');
  * @returns {Promise<object>} Fila creada.
  */
 async function createMoto({ userId, alias, placa, marca, modelo, color, anio }) {
+  // Con placa: upsert — si ya existe esa placa para este usuario, actualiza los demás
+  // campos en lugar de crear un duplicado (cubre re-registros desde el onboarding).
+  // Sin placa: insert directo (motos sin matrícula pueden repetirse).
+  if (placa) {
+    const { rows } = await getPool().query(
+      `INSERT INTO motos (user_id, alias, placa, marca, modelo, color, anio)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (user_id, placa) WHERE placa IS NOT NULL
+       DO UPDATE SET alias = EXCLUDED.alias, marca = EXCLUDED.marca,
+                     modelo = EXCLUDED.modelo, color = EXCLUDED.color,
+                     anio = EXCLUDED.anio
+       RETURNING *`,
+      [userId, alias ?? null, placa, marca ?? null, modelo ?? null, color ?? null, anio ?? null],
+    );
+    return rows[0];
+  }
+
   const { rows } = await getPool().query(
     `INSERT INTO motos (user_id, alias, placa, marca, modelo, color, anio)
      VALUES ($1, $2, $3, $4, $5, $6, $7)
      RETURNING *`,
-    [userId, alias ?? null, placa ?? null, marca ?? null, modelo ?? null, color ?? null, anio ?? null],
+    [userId, alias ?? null, null, marca ?? null, modelo ?? null, color ?? null, anio ?? null],
   );
   return rows[0];
 }
