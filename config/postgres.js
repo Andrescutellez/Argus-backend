@@ -269,7 +269,119 @@ async function initPostgres() {
     END $$
   `);
 
-  console.log('[PG] Schema listo (users, user_devices, motos, devices, subscriptions, audit_log, manufactured_devices, parking_geofences, system_settings)');
+  // ─── MÓDULO GARAGE ───────────────────────────────────────────────────────────
+
+  // Migración: odómetro actual de la moto (km) — idempotente.
+  // Se actualiza cada vez que el usuario registra un fill-up con odómetro,
+  // o lo edita manualmente desde el endpoint PATCH /api/garage/odometer.
+  await pool.query(`
+    ALTER TABLE motos ADD COLUMN IF NOT EXISTS current_odometer_km INTEGER
+  `);
+
+  /**
+   * vehicle_documents — documentos legales del vehículo.
+   *
+   * PROPÓSITO: almacenar SOAT, Tecnomecánica, licencias y garantía con sus
+   * fechas de vencimiento para calcular status y emitir recordatorios.
+   *
+   * UNIQUE (user_id, type): un usuario tiene exactamente un documento de cada tipo.
+   * Se usa upsert (ON CONFLICT) para actualizar sin duplicar.
+   *
+   * reminders: días antes del vencimiento en que se notifica al usuario.
+   * Valor por defecto {30,15,7,1} equivale a 1 mes, 2 semanas, 1 semana y 1 día.
+   */
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS vehicle_documents (
+      id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id      UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      type         VARCHAR(20) NOT NULL CHECK (type IN ('SOAT','TECNO','LIC_CONDUCCION','LIC_TRANSITO','GARANTIA')),
+      expires_at   DATE,
+      issued_at    DATE,
+      vin          VARCHAR(50),
+      engine_num   VARCHAR(50),
+      cylinder_cc  SMALLINT,
+      reminders    INTEGER[]   NOT NULL DEFAULT '{30,15,7,1}',
+      notes        TEXT,
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (user_id, type)
+    )
+  `);
+
+  /**
+   * maintenance_records — historial de mantenimientos realizados.
+   *
+   * PROPÓSITO: registrar la última vez que se hizo cada tipo de mantenimiento
+   * (cambio de aceite, filtros, cadena, etc.) para calcular el progreso hacia
+   * el próximo servicio en base a km o días transcurridos.
+   *
+   * UNIQUE (user_id, type): un registro por tipo de mantenimiento por usuario.
+   * moto_id es nullable para que la fila se conserve aunque la moto se elimine.
+   */
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS maintenance_records (
+      id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id       UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      moto_id       UUID        REFERENCES motos(id) ON DELETE SET NULL,
+      type          VARCHAR(30) NOT NULL,
+      last_done_km  INTEGER,
+      last_done_at  DATE,
+      interval_km   INTEGER,
+      interval_days INTEGER,
+      notes         TEXT,
+      created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (user_id, type)
+    )
+  `);
+
+  /**
+   * fuel_logs — historial de cargas de gasolina.
+   *
+   * PROPÓSITO: registrar cada fill-up con litros, precio y odómetro para
+   * calcular rendimiento (km/L) y costo por km a lo largo del tiempo.
+   *
+   * moto_id es nullable (SET NULL en DELETE): si se elimina la moto, los
+   * registros de combustible se conservan para el historial financiero.
+   */
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS fuel_logs (
+      id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id     UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      moto_id     UUID        REFERENCES motos(id) ON DELETE SET NULL,
+      liters      NUMERIC(6,2),
+      price_total INTEGER,
+      odometer_km INTEGER,
+      logged_at   DATE        NOT NULL DEFAULT CURRENT_DATE,
+      notes       TEXT,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  /**
+   * expense_logs — todos los gastos relacionados con la moto.
+   *
+   * PROPÓSITO: llevar contabilidad de todos los costos (gasolina, mantenimiento,
+   * multas, accesorios) para calcular el costo total de propiedad por año.
+   *
+   * category: enum cerrado para facilitar agrupación en el resumen financiero.
+   * amount: en centavos o la moneda local del usuario (entero para evitar
+   * problemas de punto flotante en sumas acumuladas).
+   */
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS expense_logs (
+      id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id     UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      moto_id     UUID        REFERENCES motos(id) ON DELETE SET NULL,
+      category    VARCHAR(15) NOT NULL CHECK (category IN ('GASOLINA','ACEITE','LAVADA','SOAT','TECNO','MULTA','REPUESTO','MANTENIMIENTO','ACCESORIO','OTRO')),
+      amount      INTEGER     NOT NULL,
+      description TEXT,
+      logged_at   DATE        NOT NULL DEFAULT CURRENT_DATE,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  console.log('[PG] Schema listo (users, user_devices, motos, devices, subscriptions, audit_log, manufactured_devices, parking_geofences, system_settings, vehicle_documents, maintenance_records, fuel_logs, expense_logs)');
 }
 
 /**
