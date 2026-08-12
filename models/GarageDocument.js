@@ -74,7 +74,7 @@ function computeDocStatus(expires_at) {
  *      al cliente sin un SELECT adicional.
  *
  * @param {string} userId  UUID del usuario autenticado (req.user.sub).
- * @param {string} type    Tipo de documento: 'SOAT'|'TECNO'|'LIC_CONDUCCION'|'LIC_TRANSITO'|'GARANTIA'.
+ * @param {string} type    Tipo de documento: 'SOAT'|'TECNO'|'LIC_CONDUCCION'.
  * @param {object} data    Campos del documento.
  * @param {string|null} [data.expires_at]   Fecha de vencimiento (ISO).
  * @param {string|null} [data.issued_at]    Fecha de expedición (ISO).

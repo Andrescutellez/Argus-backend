@@ -87,12 +87,12 @@ const getDocuments = async (req, res) => {
  * endpoint sin necesidad de saber si el documento ya existe.
  *
  * @param {import('express').Request}  req
- *   params.type: 'SOAT'|'TECNO'|'LIC_CONDUCCION'|'LIC_TRANSITO'|'GARANTIA'
+ *   params.type: 'SOAT'|'TECNO'|'LIC_CONDUCCION'
  *   body: { expires_at?, issued_at?, vin?, engine_num?, cylinder_cc?, reminders?, notes? }
  * @param {import('express').Response} res  200: documento upsertado | 400: tipo inválido
  */
 const upsertDocument = async (req, res) => {
-  const VALID_TYPES = ['SOAT', 'TECNO', 'LIC_CONDUCCION', 'LIC_TRANSITO', 'GARANTIA'];
+  const VALID_TYPES = ['SOAT', 'TECNO', 'LIC_CONDUCCION'];
   const { type } = req.params;
 
   if (!VALID_TYPES.includes(type)) {
@@ -167,6 +167,45 @@ const upsertMaintenance = async (req, res) => {
     return res.status(200).json(records);
   } catch (err) {
     console.error('[GARAGE] upsertMaintenance error:', err.message);
+    return res.status(500).json({ message: 'Error interno del servidor' });
+  }
+};
+
+/**
+ * @brief Activa o desactiva el seguimiento de un tipo de mantenimiento.
+ *
+ * PROPÓSITO: el usuario elige qué ítems quiere vigilar (p.ej. aceite sí,
+ * bujía no). Los ítems desactivados dejan de contar en getScore()/getAgenda()
+ * y no muestran progreso en la lista, pero sus datos (last_done_km/at) se
+ * conservan por si el usuario los reactiva después.
+ *
+ * @param {import('express').Request}  req
+ *   params.type: clave de MaintenanceRecord.DEFAULTS
+ *   body: { active: boolean }
+ * @param {import('express').Response} res  200: array completo de mantenimientos actualizado
+ */
+const setMaintenanceActive = async (req, res) => {
+  const { type } = req.params;
+  const { active } = req.body ?? {};
+
+  if (!MaintenanceRecord.DEFAULTS[type]) {
+    const validTypes = Object.keys(MaintenanceRecord.DEFAULTS).join(', ');
+    return res.status(400).json({ message: `Tipo inválido. Valores válidos: ${validTypes}` });
+  }
+
+  if (typeof active !== 'boolean') {
+    return res.status(400).json({ message: 'El campo active es requerido y debe ser booleano' });
+  }
+
+  try {
+    const moto = await _getPrimaryMoto(req.user.sub);
+
+    await MaintenanceRecord.setActive(req.user.sub, type, active, moto?.id ?? null);
+
+    const records = await MaintenanceRecord.getRecords(req.user.sub, moto?.current_odometer_km ?? null);
+    return res.status(200).json(records);
+  } catch (err) {
+    console.error('[GARAGE] setMaintenanceActive error:', err.message);
     return res.status(500).json({ message: 'Error interno del servidor' });
   }
 };
@@ -338,11 +377,14 @@ const deleteExpense = async (req, res) => {
  * gamificación ("mantén tu score en verde") y alertas de deterioro.
  *
  * ALGORITMO:
- *   Documentos (10 pts máx, 5 tipos × 2 pts):
+ *   Documentos (2 pts por tipo, 3 tipos = 6 pts máx):
  *     VIGENTE = 2 pts | PROXIMO_A_VENCER = 1 pt | VENCIDO/SIN_FECHA = 0 pts
- *   Mantenimientos (10 pts máx, 10 tipos × 1 pt):
+ *   Mantenimientos (1 pt por tipo ACTIVO — el usuario elige cuáles vigilar,
+ *   así que el máximo varía según cuántos tenga activos):
  *     progress < 75% = 1 pt | 75–99% = 0.5 pts | 100% = 0 pts
- *   score = round(((docPts + maintPts) / 20) * 100)
+ *   score = round(((docPts + maintPts) / (docMax + maintMax)) * 100)
+ *   Los ítems de mantenimiento con active=false no puntúan ni aparecen
+ *   en indicators — el usuario los sacó de vigilancia a propósito.
  *
  * @param {import('express').Request}  req
  * @param {import('express').Response} res
@@ -362,15 +404,13 @@ const getScore = async (req, res) => {
     let maintPts = 0;
 
     // ── Puntuación de documentos ──────────────────────────────────────────────
-    // Los 5 tipos se evalúan siempre. Si el usuario no tiene el documento guardado,
+    // Los 3 tipos se evalúan siempre. Si el usuario no tiene el documento guardado,
     // es como SIN_FECHA (0 pts).
-    const DOC_TYPES = ['SOAT', 'TECNO', 'LIC_CONDUCCION', 'LIC_TRANSITO', 'GARANTIA'];
+    const DOC_TYPES = ['SOAT', 'TECNO', 'LIC_CONDUCCION'];
     const DOC_LABELS = {
       SOAT:           'SOAT',
       TECNO:          'Tecnomecánica',
       LIC_CONDUCCION: 'Licencia de conducción',
-      LIC_TRANSITO:   'Licencia de tránsito',
-      GARANTIA:       'Garantía',
     };
 
     const docByType = new Map(docs.map((d) => [d.type, d]));
@@ -401,7 +441,13 @@ const getScore = async (req, res) => {
     }
 
     // ── Puntuación de mantenimientos ──────────────────────────────────────────
+    // Los ítems que el usuario desactivó (active=false) no puntúan ni se
+    // muestran — están fuera de lo que decidió vigilar.
+    let activeMaintCount = 0;
     for (const rec of maintenance) {
+      if (rec.active === false) continue;
+      activeMaintCount += 1;
+
       let pts  = 0;
       let color = 'red';
       let detail = 'Sin registro';
@@ -427,7 +473,10 @@ const getScore = async (req, res) => {
       indicators.push({ key: rec.type, label: rec.label, status: color, detail });
     }
 
-    const score = Math.round(((docPts + maintPts) / 20) * 100);
+    // Denominador dinámico: el máximo de mantenimiento depende de cuántos
+    // ítems el usuario dejó activos (puede ser 0 si desactivó todos).
+    const maxPts = DOC_TYPES.length * 2 + activeMaintCount * 1;
+    const score  = maxPts > 0 ? Math.round(((docPts + maintPts) / maxPts) * 100) : 0;
 
     return res.status(200).json({ score, indicators });
   } catch (err) {
@@ -468,15 +517,11 @@ const getAgenda = async (req, res) => {
       SOAT:           'shield',
       TECNO:          'wrench',
       LIC_CONDUCCION: 'id-card',
-      LIC_TRANSITO:   'file-text',
-      GARANTIA:       'star',
     };
     const DOC_LABELS = {
       SOAT:           'SOAT',
       TECNO:          'Tecnomecánica',
       LIC_CONDUCCION: 'Licencia de conducción',
-      LIC_TRANSITO:   'Licencia de tránsito',
-      GARANTIA:       'Garantía',
     };
 
     for (const doc of docs) {
@@ -493,7 +538,10 @@ const getAgenda = async (req, res) => {
     }
 
     // ── Eventos de mantenimiento ──────────────────────────────────────────────
+    // Ítems desactivados por el usuario no generan recordatorios de agenda.
     for (const rec of maintenance) {
+      if (rec.active === false) continue;
+
       const nearByKm   = rec.km_remaining   != null && rec.km_remaining   <= 500;
       const nearByDays = rec.days_remaining != null && rec.days_remaining <= 30;
       const overdue    = rec.progress_pct >= 100;
@@ -579,6 +627,7 @@ module.exports = {
   upsertDocument,
   getMaintenance,
   upsertMaintenance,
+  setMaintenanceActive,
   getFuel,
   addFuel,
   deleteFuel,

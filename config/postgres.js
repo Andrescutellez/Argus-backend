@@ -294,7 +294,7 @@ async function initPostgres() {
     CREATE TABLE IF NOT EXISTS vehicle_documents (
       id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
       user_id      UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      type         VARCHAR(20) NOT NULL CHECK (type IN ('SOAT','TECNO','LIC_CONDUCCION','LIC_TRANSITO','GARANTIA')),
+      type         VARCHAR(20) NOT NULL CHECK (type IN ('SOAT','TECNO','LIC_CONDUCCION')),
       expires_at   DATE,
       issued_at    DATE,
       vin          VARCHAR(50),
@@ -333,6 +333,13 @@ async function initPostgres() {
       updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       UNIQUE (user_id, type)
     )
+  `);
+
+  // Migración: permite al usuario dejar de vigilar un tipo de mantenimiento
+  // (p.ej. no le interesa trackear la bujía). Default true — no cambia el
+  // comportamiento para usuarios que ya tenían registros antes de esta columna.
+  await pool.query(`
+    ALTER TABLE maintenance_records ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT true
   `);
 
   /**

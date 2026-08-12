@@ -160,6 +160,41 @@ async function upsertRecord(userId, type, data, motoId = null) {
 }
 
 /**
+ * @brief Activa o desactiva el seguimiento de un tipo de mantenimiento.
+ *
+ * PROPÓSITO: permitir que el usuario elija qué ítems quiere vigilar (p.ej.
+ * seguir el aceite pero ignorar la bujía). No borra ningún dato existente —
+ * solo cambia la bandera active, así que si el usuario reactiva el ítem más
+ * tarde, su last_done_km/at siguen ahí.
+ *
+ * FLUJO:
+ *   1. INSERT con solo (user_id, moto_id, type, active) — si el usuario nunca
+ *      había tocado este tipo, se crea una fila "vacía" solo para guardar la
+ *      preferencia, sin fechas ni intervalos.
+ *   2. ON CONFLICT: actualiza únicamente active, sin tocar last_done_km/at,
+ *      intervalos ni notas (a diferencia de upsertRecord, que sí los pisa).
+ *
+ * @param {string} userId  UUID del usuario autenticado.
+ * @param {string} type    Clave del mantenimiento (debe coincidir con DEFAULTS).
+ * @param {boolean} active  true = vigilar, false = ignorar en score/agenda/lista.
+ * @param {string|null} [motoId]  UUID de la moto (opcional).
+ * @returns {Promise<object>} Fila upsertada (sin progreso — usar getRecords para eso).
+ */
+async function setActive(userId, type, active, motoId = null) {
+  const { rows } = await getPool().query(
+    `INSERT INTO maintenance_records (user_id, moto_id, type, active)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (user_id, type) DO UPDATE SET
+       active     = EXCLUDED.active,
+       updated_at = NOW()
+     RETURNING *`,
+    [userId, motoId, type, active],
+  );
+
+  return rows[0];
+}
+
+/**
  * @brief Retorna todos los tipos de mantenimiento con progreso calculado.
  *
  * PROPÓSITO: generar la lista completa del Garage fusionando DEFAULTS con los
@@ -221,6 +256,8 @@ async function getRecords(userId, currentOdometerKm) {
       progress_pct,
       km_remaining,
       days_remaining,
+      // Preferencia del usuario — default true para no romper items nunca tocados.
+      active: saved.active ?? true,
     };
   });
 }
@@ -244,7 +281,7 @@ async function getRecord(userId, type) {
   return rows[0] ?? null;
 }
 
-module.exports = { upsertRecord, getRecords, getRecord, DEFAULTS, computeProgress };
+module.exports = { upsertRecord, setActive, getRecords, getRecord, DEFAULTS, computeProgress };
 
 
 /* ═══════════════════════════════════════════════════════════

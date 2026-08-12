@@ -10,8 +10,9 @@
  * ENDPOINTS:
  *   GET    /api/garage/documents          — listar documentos con estado de vigencia
  *   PUT    /api/garage/documents/:type    — crear/actualizar documento por tipo
- *   GET    /api/garage/maintenance        — listar mantenimientos con progreso
- *   PUT    /api/garage/maintenance/:type  — crear/actualizar mantenimiento por tipo
+ *   GET    /api/garage/maintenance               — listar mantenimientos con progreso
+ *   PUT    /api/garage/maintenance/:type         — crear/actualizar mantenimiento por tipo
+ *   PATCH  /api/garage/maintenance/:type/active  — activar/desactivar seguimiento de un tipo
  *   GET    /api/garage/fuel               — historial de combustible + resumen
  *   POST   /api/garage/fuel               — registrar nuevo fill-up
  *   DELETE /api/garage/fuel/:id           — eliminar fill-up
@@ -38,6 +39,7 @@ const {
   upsertDocument,
   getMaintenance,
   upsertMaintenance,
+  setMaintenanceActive,
   getFuel,
   addFuel,
   deleteFuel,
@@ -60,8 +62,9 @@ router.get('/documents',        getDocuments);
 router.put('/documents/:type',  upsertDocument);
 
 // ─── MANTENIMIENTO ────────────────────────────────────────────────────────────
-router.get('/maintenance',        getMaintenance);
-router.put('/maintenance/:type',  upsertMaintenance);
+router.get('/maintenance',               getMaintenance);
+router.put('/maintenance/:type',         upsertMaintenance);
+router.patch('/maintenance/:type/active', setMaintenanceActive);
 
 // ─── COMBUSTIBLE ──────────────────────────────────────────────────────────────
 router.get('/fuel',        getFuel);
