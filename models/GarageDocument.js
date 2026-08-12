@@ -104,7 +104,7 @@ async function upsertDocument(userId, type, data) {
   const { rows } = await getPool().query(
     `INSERT INTO vehicle_documents
        (user_id, type, expires_at, issued_at, vin, engine_num, cylinder_cc, reminders, notes)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8, '{30,15,7,1}'), $9)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8::integer[], '{30,15,7,1}'::integer[]), $9)
      ON CONFLICT (user_id, type) DO UPDATE SET
        expires_at  = EXCLUDED.expires_at,
        issued_at   = EXCLUDED.issued_at,
