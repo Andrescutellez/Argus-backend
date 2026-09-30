@@ -463,6 +463,13 @@ function handleFrame(socket, ctx, remote, frame) {
         // Crear cola de comandos si no existía (reconexión: conserva pendientes)
         if (!gt06CommandQueues.has(imei)) gt06CommandQueues.set(imei, []);
 
+        // Restaurar estado armed desde DB tras reinicio del servidor (gt06ArmedState es en memoria)
+        if (!gt06ArmedState.has(imei)) {
+          DeviceState.findOne({ deviceId: imei }).then(state => {
+            if (state?.armed) gt06ArmedState.set(imei, true);
+          }).catch(() => {});
+        }
+
         log('info', 'gt06.login.ok', { remote, imei });
 
         // Responder ACK — el device entra en loop de reconexión si no recibe esto en 5s
