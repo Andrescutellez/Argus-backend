@@ -68,10 +68,14 @@ const GT06_COMMAND_MAP = {
   // Diagnóstico temporal — estado y parámetros del device
   STATUS_QUERY:   'STATUS#',
   PARAM_QUERY:    'PARAM#',
-  // Diagnóstico temporal — Defense mode (ARM físico del J16)
+  // Diagnóstico temporal — Defense mode (ARM físico del J16), variantes de sintaxis
   DEFENSE_ON:     'DEFENSE,ON#',
   DEFENSE_OFF:    'DEFENSE,OFF#',
   DEFENSE_QUERY:  'DEFENSE#',
+  DEFENSE_ON_1:   'DEFENSE,1#',
+  DEFENSE_OFF_0:  'DEFENSE,0#',
+  DEF_ON:         'DEF,ON#',
+  ALARM_ON:       'ALARM,1#',
 };
 
 // ─── ESTADO COMPARTIDO ───────────────────────────────────────────────────────

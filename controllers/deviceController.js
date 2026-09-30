@@ -77,6 +77,10 @@ const VALID_COMMANDS = [
   'DEFENSE_ON',
   'DEFENSE_OFF',
   'DEFENSE_QUERY',
+  'DEFENSE_ON_1',
+  'DEFENSE_OFF_0',
+  'DEF_ON',
+  'ALARM_ON',
 ];
 
 /**
