@@ -50,7 +50,16 @@ const GT06_PORT       = parseInt(process.env.GT06_PORT || '9002', 10);
 const INACTIVITY_MS   = 600_000; // 10 minutos — el device envía heartbeat cada ~3 min
 const MAX_BUFFER_BYTES= 1024;    // protección contra memory exhaustion por clientes maliciosos
 const MAX_FAILED_AUTH = 3;       // intentos de login con IMEI no registrado antes de cerrar
-const RATE_LIMIT_MS   = 3_000;   // intervalo mínimo entre ubicaciones aceptadas
+const RATE_LIMIT_MS        = 3_000;   // intervalo mínimo entre ubicaciones aceptadas
+
+// ─── MODO GT06_MOTION_PUSH ────────────────────────────────────────────────────
+// Cuando GT06_MOTION_PUSH=1 en .env, el primer paquete GPS tras N segundos de
+// silencio dispara el push sin esperar el frame 0x16 (que llega 1-2s después).
+// El 0x16 posterior se suprime con MOTION_PUSH_DEDUP_MS para evitar duplicados.
+// Para desactivar: GT06_MOTION_PUSH=0 (o quitar la variable) y reiniciar PM2.
+const GT06_MOTION_PUSH     = process.env.GT06_MOTION_PUSH === '1';
+const MOTION_PUSH_GAP_MS   = 30_000; // silencio mínimo para considerar "primera ubicación tras movimiento"
+const MOTION_PUSH_DEDUP_MS = 60_000; // ventana en la que el 0x16 posterior no dispara push duplicado
 
 // ─── MAPEO DE COMANDOS ARGUS → GT06 ──────────────────────────────────────────
 
@@ -108,6 +117,12 @@ const gt06CommandQueues = new Map();
  * @type {Map<string, { text: string, flag: number }>}
  */
 const gt06LastSentCmds = new Map();
+
+/** Estado armed por IMEI (sincronizado con DEFENSE_OK). Solo para modo GT06_MOTION_PUSH. */
+const gt06ArmedState = new Map();
+
+/** ms del último push de movimiento anticipado por IMEI. Evita duplicar con el 0x16 posterior. */
+const gt06LastMotionPushMs = new Map();
 
 /**
  * Contador global de seriales de comandos del servidor.
@@ -280,6 +295,16 @@ async function handleGt06Alarm(imei, alarmType, lat, lon) {
   // Para 0x03 (vibración): el J16 solo emite este packet cuando Defense:ON está activo
   // en el propio hardware — no hace falta verificar DeviceState.armed en backend.
   // El device es la fuente de verdad sobre su propio estado de defensa.
+
+  // En modo GT06_MOTION_PUSH el push ya se envió al recibir la ubicación previa.
+  // Suprimir para evitar notificación duplicada al usuario.
+  if (GT06_MOTION_PUSH && alarmType === 0x03) {
+    const lastMotionMs = gt06LastMotionPushMs.get(imei) ?? 0;
+    if (Date.now() - lastMotionMs < MOTION_PUSH_DEDUP_MS) {
+      log('debug', 'gt06.alarm.push.dedup', { imei, alarmType: '0x03' });
+      return;
+    }
+  }
 
   // Push a móvil (FCM) y browser (Web Push) en paralelo — no bloqueante
   sendGt06AlarmPush(imei, alarmType, lat, lon).catch(() => {});
@@ -486,7 +511,8 @@ function handleFrame(socket, ctx, remote, frame) {
         return;
       }
 
-      ctx.lastLocationMs = now;
+      const prevLocationMs  = ctx.lastLocationMs;
+      ctx.lastLocationMs    = now;
 
       const point = {
         deviceId:  ctx.imei,
@@ -512,6 +538,18 @@ function handleFrame(socket, ctx, remote, frame) {
         satellites: loc.satellites,
         hasFix:     loc.hasFix,
       });
+
+      // Modo GT06_MOTION_PUSH: push anticipado al primer GPS tras quietud prolongada.
+      // Condiciones: flag activo + device armado + fix válido + gap desde última ubicación > umbral.
+      // El 0x16 que llega segundos después queda suprimido por gt06LastMotionPushMs (dedup).
+      if (GT06_MOTION_PUSH && loc.hasFix && gt06ArmedState.get(ctx.imei)) {
+        const gap = now - prevLocationMs;
+        if (prevLocationMs > 0 && gap > MOTION_PUSH_GAP_MS) {
+          gt06LastMotionPushMs.set(ctx.imei, now);
+          sendGt06AlarmPush(ctx.imei, 0x03, loc.lat, loc.lon).catch(() => {});
+          log('info', 'gt06.motion.push', { imei: ctx.imei, gapMs: gap });
+        }
+      }
 
       break;
     }
@@ -620,6 +658,7 @@ function handleFrame(socket, ctx, remote, frame) {
         if (_io) {
           _io.to(`device:${ctx.imei}`).emit('device:state', { armed });
         }
+        gt06ArmedState.set(ctx.imei, armed);
         log('info', 'gt06.defense.confirmed', { imei: ctx.imei, armed });
 
       } else {
