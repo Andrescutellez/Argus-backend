@@ -294,8 +294,13 @@ function makeSocketHandler(socket) {
   socket.on('close', () => {
     gt06ConnectedDevices.delete(socket);
     if (ctx.imei) {
-      gt06OnlineImeis.delete(ctx.imei);
-      gt06ImeiSockets.delete(ctx.imei);
+      // Solo limpiar presencia si este socket sigue siendo el activo.
+      // Si el device reconectó antes de que esta conexión cerrara, el map ya
+      // apunta al socket nuevo — borrarlo marcaría el device como offline incorrectamente.
+      if (gt06ImeiSockets.get(ctx.imei) === socket) {
+        gt06OnlineImeis.delete(ctx.imei);
+        gt06ImeiSockets.delete(ctx.imei);
+      }
 
       // Si había un comando enviado sin confirmar (sin 0x15 del device), re-encolar
       // al frente para que se entregue en la próxima reconexión.
