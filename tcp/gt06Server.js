@@ -542,11 +542,13 @@ function handleFrame(socket, ctx, remote, frame) {
     }
 
     default: {
-      // No responder, no cerrar — el device puede enviar protocolos no implementados
+      // No responder, no cerrar — el device puede enviar protocolos no implementados.
+      // Incluir hex del data para poder identificar el formato en Fase 3.
       log('info', 'gt06.proto.unsupported', {
         remote,
         imei:     ctx.imei,
         protocol: `0x${frame.protocol.toString(16).padStart(2, '0')}`,
+        dataHex:  frame.data.toString('hex'),
       });
       break;
     }
