@@ -118,9 +118,6 @@ const gt06CommandQueues = new Map();
  */
 const gt06LastSentCmds = new Map();
 
-/** Estado armed por IMEI (sincronizado con DEFENSE_OK). Solo para modo GT06_MOTION_PUSH. */
-const gt06ArmedState = new Map();
-
 /** ms del último push de movimiento anticipado por IMEI. Evita duplicar con el 0x16 posterior. */
 const gt06LastMotionPushMs = new Map();
 
@@ -463,13 +460,6 @@ function handleFrame(socket, ctx, remote, frame) {
         // Crear cola de comandos si no existía (reconexión: conserva pendientes)
         if (!gt06CommandQueues.has(imei)) gt06CommandQueues.set(imei, []);
 
-        // Restaurar estado armed desde DB tras reinicio del servidor (gt06ArmedState es en memoria)
-        if (!gt06ArmedState.has(imei)) {
-          DeviceState.findOne({ deviceId: imei }).then(state => {
-            if (state?.armed) gt06ArmedState.set(imei, true);
-          }).catch(() => {});
-        }
-
         log('info', 'gt06.login.ok', { remote, imei });
 
         // Responder ACK — el device entra en loop de reconexión si no recibe esto en 5s
@@ -547,14 +537,20 @@ function handleFrame(socket, ctx, remote, frame) {
       });
 
       // Modo GT06_MOTION_PUSH: push anticipado al primer GPS tras quietud prolongada.
-      // Condiciones: flag activo + device armado + fix válido + gap desde última ubicación > umbral.
-      // El 0x16 que llega segundos después queda suprimido por gt06LastMotionPushMs (dedup).
-      if (GT06_MOTION_PUSH && loc.hasFix && gt06ArmedState.get(ctx.imei)) {
+      // Se consulta DeviceState en MongoDB solo cuando hay un gap significativo (evento raro)
+      // para evitar el problema del Map en memoria que se vacía con cada restart de PM2.
+      if (GT06_MOTION_PUSH && loc.hasFix && prevLocationMs > 0) {
         const gap = now - prevLocationMs;
-        if (prevLocationMs > 0 && gap > MOTION_PUSH_GAP_MS) {
-          gt06LastMotionPushMs.set(ctx.imei, now);
-          sendGt06AlarmPush(ctx.imei, 0x03, loc.lat, loc.lon).catch(() => {});
-          log('info', 'gt06.motion.push', { imei: ctx.imei, gapMs: gap });
+        if (gap > MOTION_PUSH_GAP_MS) {
+          const snapImei = ctx.imei;
+          const snapLat  = loc.lat;
+          const snapLon  = loc.lon;
+          DeviceState.findOne({ deviceId: snapImei }).then(state => {
+            if (!state?.armed) return;
+            gt06LastMotionPushMs.set(snapImei, Date.now());
+            sendGt06AlarmPush(snapImei, 0x03, snapLat, snapLon).catch(() => {});
+            log('info', 'gt06.motion.push', { imei: snapImei, gapMs: gap });
+          }).catch(() => {});
         }
       }
 
@@ -665,7 +661,6 @@ function handleFrame(socket, ctx, remote, frame) {
         if (_io) {
           _io.to(`device:${ctx.imei}`).emit('device:state', { armed });
         }
-        gt06ArmedState.set(ctx.imei, armed);
         log('info', 'gt06.defense.confirmed', { imei: ctx.imei, armed });
 
       } else {
