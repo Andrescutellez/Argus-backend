@@ -160,10 +160,31 @@ function parseFrames(buf) {
 }
 
 /**
+ * @brief Validación Luhn para strings de dígitos (IMEI checksum estándar).
+ * @param {string} str - 15 dígitos
+ * @returns {boolean}
+ */
+function luhnCheck(str) {
+  let sum = 0;
+  let dbl = false;
+  for (let i = str.length - 1; i >= 0; i--) {
+    let d = parseInt(str[i], 10);
+    if (dbl) { d *= 2; if (d > 9) d -= 9; }
+    sum += d;
+    dbl = !dbl;
+  }
+  return sum % 10 === 0;
+}
+
+/**
  * @brief Decodifica el Login Packet (Protocol 0x01).
  *
- * IMEI en BCD: 8 bytes = 16 nibbles, 15 dígitos útiles (último nibble es padding).
- * Ejemplo: IMEI 035341353215036 → bytes [03 53 41 35 32 15 03 6x].
+ * IMEI en BCD: 8 bytes = 16 nibbles, 15 dígitos útiles.
+ * GT06 estándar: IMEI left-aligned, padding nibble al final (0x0 o 0xF).
+ * J16 y algunos Concox: IMEI right-aligned, padding nibble 0x0 al inicio.
+ *
+ * Detección del encoding J16: primer nibble = '0', IMEI estándar falla Luhn,
+ * IMEI desplazado (nibbles 1-15) pasa Luhn → retorna el desplazado.
  *
  * @param {Buffer} data - Campo DATA del frame (8 bytes)
  * @returns {{ imei: string }} IMEI de 15 dígitos como string
@@ -172,14 +193,22 @@ function parseFrames(buf) {
 function decodeLogin(data) {
   if (data.length < 8) throw new Error(`Login data too short: ${data.length}`);
 
-  let imei = '';
+  let nibbles = '';
   for (let i = 0; i < 8; i++) {
-    const hi = (data[i] >> 4) & 0x0F;
-    const lo =  data[i]       & 0x0F;
-    imei += hi.toString();
-    if (imei.length < 15) imei += lo.toString();
+    nibbles += ((data[i] >> 4) & 0x0F).toString(16);
+    nibbles += (data[i] & 0x0F).toString(16);
   }
-  return { imei };
+
+  const standard = nibbles.slice(0, 15);
+
+  // J16 padding detection: skip the leading 0 nibble if standard parse fails Luhn
+  // and the shifted version passes — avoids misreading real IMEIs starting with 0
+  if (nibbles[0] === '0' && !luhnCheck(standard)) {
+    const shifted = nibbles.slice(1, 16);
+    if (luhnCheck(shifted)) return { imei: shifted };
+  }
+
+  return { imei: standard };
 }
 
 /**

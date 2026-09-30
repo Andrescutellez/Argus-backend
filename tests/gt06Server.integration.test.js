@@ -63,13 +63,9 @@ const { buildAck, PROTO_LOGIN, PROTO_HEARTBEAT } = require('../tcp/gt06Parser');
 
 // ─── PAQUETES DE REFERENCIA ──────────────────────────────────────────────────
 
-// Login: 78 78 0D 01 | IMEI[8] | SN(2) | CRC(2) | 0D 0A
-// IMEI BCD "035341353215036" → [03 53 41 35 32 15 03 62], SN=0x0002, CRC=0x2D06
-const LOGIN_PKT    = Buffer.from('78780D010353413532150362000220D060D0A'.replace(/\s|[^0-9A-Fa-f]/g, ''), 'hex');
-
-// Reconstruir LOGIN_PKT correctamente con CRC real
-// Login: 78 78 0D 01 03534135321503620002 2D06 0D0A
-const LOGIN_PKT_OK = Buffer.from('78780D010353413532150362' + '0002' + '2D06' + '0D0A', 'hex');
+// Login J16 real: IMEI 867689067010506, BCD J16-style [08 67 68 90 67 01 05 06], SN=0002, CRC=E8C0
+// El J16 prepone nibble 0x0 de padding (IMEI right-aligned); el parser lo detecta via Luhn.
+const LOGIN_PKT_OK = Buffer.from('78780D01' + '0867689067010506' + '0002' + 'E8C0' + '0D0A', 'hex');
 
 // Location: 78 78 1F 12 ...
 const LOCATION_PKT = Buffer.from(
@@ -163,8 +159,8 @@ describe('GT06 Server — flujo completo', () => {
     const expectedAck = buildAck(PROTO_LOGIN, 0x0002);
     assert.deepStrictEqual(response, expectedAck);
 
-    // isAllowed fue llamado con el IMEI correcto
-    assert.strictEqual(mockState.isAllowedImei, '035341353215036');
+    // isAllowed fue llamado con el IMEI correcto (J16 real)
+    assert.strictEqual(mockState.isAllowedImei, '867689067010506');
 
     socket.destroy();
   });
@@ -221,8 +217,8 @@ describe('GT06 Server — flujo completo', () => {
     assert.strictEqual(mockState.enqueueCalls.length, 1);
     const point = mockState.enqueueCalls[0];
 
-    // IMEI
-    assert.strictEqual(point.deviceId, '035341353215036');
+    // IMEI J16 real
+    assert.strictEqual(point.deviceId, '867689067010506');
 
     // Lat ≈ 23.07° Norte
     assert.ok(point.lat > 23.0 && point.lat < 23.2, `lat=${point.lat}`);

@@ -26,14 +26,14 @@ const {
 
 // ─── PAQUETES DE REFERENCIA (spec GT06 Apéndice B) ───────────────────────────
 
-const LOGIN_TX     = Buffer.from('787808010353413532150362000131BF0D0A', 'hex');
-// Nota: usamos el paquete del spec original
-const LOGIN_TX_SPEC = Buffer.from('78780D010353413532150362000220D060D0A'.replace(/\s/g, ''), 'hex');
-
-// Paquete exacto del spec:
-// 78 78 0D 01 | 03 53 41 35 32 15 03 62 | 00 02 | 2D 06 | 0D 0A
-const LOGIN_PKT    = Buffer.from('78780D0103534135321503620002' + '2D06' + '0D0A', 'hex');
+// IMEI estándar GT06: 490154203237518, BCD [49 01 54 20 32 37 51 8F], SN=0002, CRC=2AC3
+// Primer nibble = '4' → no activa detección J16; IMEI Luhn-válido.
+const LOGIN_PKT    = Buffer.from('78780D01' + '490154203237518F' + '0002' + '2AC3' + '0D0A', 'hex');
 const LOGIN_ACK    = Buffer.from('787805010002' + 'EB47' + '0D0A', 'hex');
+
+// IMEI J16 real: 867689067010506, J16-BCD [08 67 68 90 67 01 05 06], SN=0002, CRC=E8C0
+// El J16 prepone un nibble 0x0 de padding (IMEI right-aligned en 16 nibbles).
+const LOGIN_PKT_J16 = Buffer.from('78780D01' + '0867689067010506' + '0002' + 'E8C0' + '0D0A', 'hex');
 
 // 78 78 1F 12 | 0B 08 1D 11 2E 10 | CF | 02 7A C7 EB | 0C 46 58 49 | 00 | 14 8F | 01 CC | 00 | 28 7D | 00 1F B8 | 00 03 | 80 81 | 0D 0A
 const LOCATION_PKT = Buffer.from(
@@ -184,19 +184,26 @@ describe('parseFrames', () => {
     const { frames } = parseFrames(LOGIN_PKT);
     // dataLen = 0x0D - 5 = 8 (IMEI BCD 8 bytes)
     assert.strictEqual(frames[0].data.length, 8);
-    // IMEI bytes: 03 53 41 35 32 15 03 62
-    assert.strictEqual(frames[0].data[0], 0x03);
-    assert.strictEqual(frames[0].data[7], 0x62);
+    // IMEI 490154203237518 → bytes [49 01 54 20 32 37 51 8F]
+    assert.strictEqual(frames[0].data[0], 0x49);
+    assert.strictEqual(frames[0].data[7], 0x8F);
   });
 });
 
 // ─── TESTS decodeLogin ────────────────────────────────────────────────────────
 
 describe('decodeLogin', () => {
-  test('IMEI desde spec: bytes [03 53 41 35 32 15 03 62] → "035341353215036"', () => {
-    const data = Buffer.from([0x03, 0x53, 0x41, 0x35, 0x32, 0x15, 0x03, 0x62]);
+  test('IMEI estándar GT06: bytes [49 01 54 20 32 37 51 8F] → "490154203237518"', () => {
+    const data = Buffer.from([0x49, 0x01, 0x54, 0x20, 0x32, 0x37, 0x51, 0x8F]);
     const { imei } = decodeLogin(data);
-    assert.strictEqual(imei, '035341353215036');
+    assert.strictEqual(imei, '490154203237518');
+  });
+
+  test('IMEI J16: bytes [08 67 68 90 67 01 05 06] → "867689067010506" (padding nibble inicial)', () => {
+    // El J16 right-alinea el IMEI: primer nibble = 0 (padding), IMEI en nibbles 1-15.
+    const data = Buffer.from([0x08, 0x67, 0x68, 0x90, 0x67, 0x01, 0x05, 0x06]);
+    const { imei } = decodeLogin(data);
+    assert.strictEqual(imei, '867689067010506');
   });
 
   test('IMEI tiene exactamente 15 dígitos', () => {
@@ -206,7 +213,7 @@ describe('decodeLogin', () => {
   });
 
   test('IMEI es solo dígitos (0-9)', () => {
-    const data = Buffer.from([0x03, 0x53, 0x41, 0x35, 0x32, 0x15, 0x03, 0x62]);
+    const data = Buffer.from([0x49, 0x01, 0x54, 0x20, 0x32, 0x37, 0x51, 0x8F]);
     const { imei } = decodeLogin(data);
     assert.match(imei, /^\d{15}$/);
   });
@@ -215,10 +222,16 @@ describe('decodeLogin', () => {
     assert.throws(() => decodeLogin(Buffer.from([0x01, 0x02])), /too short/);
   });
 
-  test('Usa data del frame real del spec', () => {
+  test('Usa data del frame LOGIN_PKT (estándar)', () => {
     const { frames } = parseFrames(LOGIN_PKT);
     const { imei } = decodeLogin(frames[0].data);
-    assert.strictEqual(imei, '035341353215036');
+    assert.strictEqual(imei, '490154203237518');
+  });
+
+  test('Usa data del frame LOGIN_PKT_J16', () => {
+    const { frames } = parseFrames(LOGIN_PKT_J16);
+    const { imei } = decodeLogin(frames[0].data);
+    assert.strictEqual(imei, '867689067010506');
   });
 });
 
