@@ -61,6 +61,10 @@ const RATE_LIMIT_MS   = 3_000;   // intervalo mínimo entre ubicaciones aceptada
 const GT06_COMMAND_MAP = {
   ENGINE_CUT:     'DYD,000000#',   // Cortar combustible. Rechazado si velocidad > 20 km/h.
   ENGINE_RESTORE: 'HFYD,000000#',  // Restaurar combustible.
+  // Diagnóstico temporal — vibration alarm (SENALM). Remover tras confirmar soporte.
+  SENALM_QUERY:   'SENALM#',
+  SENALM_ON:      'SENALM,ON,0#',  // Activar solo GPRS (sin SMS ni llamada)
+  SENALM_OFF:     'SENALM,OFF#',
 };
 
 // ─── ESTADO COMPARTIDO ───────────────────────────────────────────────────────
