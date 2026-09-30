@@ -505,16 +505,20 @@ function handleFrame(socket, ctx, remote, frame) {
         ).catch(() => {});
         if (_io) _io.to(`device:${ctx.imei}`).emit('gt06:cmd:ack', { cmd: 'ENGINE_CUT', result: 'success' });
 
-      } else if (resp.text.startsWith('DYD=Speed Limit')) {
-        // El GT06 rechaza DYD si velocidad > 20 km/h — revertir el update optimista
+      } else if (resp.text.startsWith('DYD=Speed Limit') || resp.text.startsWith('DYD=Unvalued Fix')) {
+        // GT06 rechaza DYD si: velocidad > 20 km/h (Speed Limit) o sin fix GPS (Unvalued Fix).
+        // En ambos casos revertir el update optimista — el motor NO fue cortado.
         DeviceState.findOneAndUpdate(
           { deviceId: ctx.imei },
           { motorCut: false, updatedAt: new Date() },
           { upsert: true },
         ).catch(() => {});
+        const reason = resp.text.startsWith('DYD=Speed Limit') ? 'speed_limit' : 'no_gps_fix';
+        const message = reason === 'speed_limit'
+          ? 'No se puede cortar motor: velocidad > 20 km/h'
+          : 'No se puede cortar motor: sin fix GPS';
         if (_io) _io.to(`device:${ctx.imei}`).emit('gt06:cmd:ack', {
-          cmd: 'ENGINE_CUT', result: 'speed_limit',
-          message: 'No se puede cortar motor: velocidad > 20 km/h',
+          cmd: 'ENGINE_CUT', result: reason, message,
         });
 
       } else if (resp.text.startsWith('HFYD=Success')) {
