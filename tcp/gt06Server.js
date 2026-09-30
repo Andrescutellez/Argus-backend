@@ -58,8 +58,8 @@ const RATE_LIMIT_MS        = 3_000;   // intervalo mínimo entre ubicaciones ace
 // El 0x16 posterior se suprime con MOTION_PUSH_DEDUP_MS para evitar duplicados.
 // Para desactivar: GT06_MOTION_PUSH=0 (o quitar la variable) y reiniciar PM2.
 const GT06_MOTION_PUSH     = process.env.GT06_MOTION_PUSH === '1';
-const MOTION_PUSH_GAP_MS   = 30_000; // silencio mínimo para considerar "primera ubicación tras movimiento"
-const MOTION_PUSH_DEDUP_MS = 60_000; // ventana en la que el 0x16 posterior no dispara push duplicado
+const MOTION_PUSH_GAP_MS   = 120_000; // silencio mínimo: J16 quieto no manda GPS → gap real es de minutos
+const MOTION_PUSH_DEDUP_MS = 300_000; // 5 min para suprimir el 0x16 que llega 1-2s después del location
 
 // ─── MAPEO DE COMANDOS ARGUS → GT06 ──────────────────────────────────────────
 
