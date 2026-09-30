@@ -68,6 +68,7 @@ const { initGeoStream }       = require('./services/geoStreamService'); // WebSo
 const { warmCache: warmCrimeCache } = require('./controllers/crimeController'); // Pre-carga ARI cache
 const { warmGeofenceCache } = require('./tcp/geofenceMonitor');                  // Pre-carga geocercas activas
 const { startTcpServer, startTlsServer } = require('./tcp/tcpServer'); // Servidores TCP/TLS para ESP32
+const { startGt06Server }               = require('./tcp/gt06Server'); // Servidor TCP GT06 para GPS OEM chinos (:9002)
 const { setIo } = require('./services/socketService'); // Singleton io para controllers
 const { startWorker } = require('./tcp/queue');        // Worker que escribe batches a MongoDB
 
@@ -215,6 +216,11 @@ startTcpServer(io);
 // Si los certificados no existen en certs/, se omite sin crashear y solo queda el TCP plano.
 // Rollback: flashear firmware con TCP_USE_TLS=0 → vuelve a conectar por el puerto 9000.
 startTlsServer(io);
+
+// Levanta el servidor GT06 en GT06_PORT (9002 por defecto) — solo telemetría entrante.
+// Recibe Login (0x01), Location (0x12), Heartbeat (0x13) de dispositivos GPS OEM chinos.
+// No envía comandos al device. Ver tcp/gt06Server.js para detalles de Fase 1.
+startGt06Server(io);
 
 // Pre-carga el cache de criminalidad para que riskMonitor.js pueda calcular
 // ARI desde el primer paquete GPS, sin esperar a que alguien abra la web.
