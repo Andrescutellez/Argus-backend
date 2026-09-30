@@ -277,14 +277,9 @@ async function handleGt06Alarm(imei, alarmType, lat, lon) {
     ).catch(() => {});
   }
 
-  if (alarmType === 0x03) {
-    // Vibración — verificar que el device esté armado antes de alertar
-    const state = await DeviceState.findOne({ deviceId: imei }).catch(() => null);
-    if (!state?.armed) {
-      log('debug', 'gt06.alarm.ignored.disarmed', { imei });
-      return;
-    }
-  }
+  // Para 0x03 (vibración): el J16 solo emite este packet cuando Defense:ON está activo
+  // en el propio hardware — no hace falta verificar DeviceState.armed en backend.
+  // El device es la fuente de verdad sobre su propio estado de defensa.
 
   // Push a móvil (FCM) y browser (Web Push) en paralelo — no bloqueante
   sendGt06AlarmPush(imei, alarmType, lat, lon).catch(() => {});
@@ -571,6 +566,8 @@ function handleFrame(socket, ctx, remote, frame) {
         break;
       }
 
+      // Guardar antes de borrar: DEFENSE_OK necesita saber qué comando se envió.
+      const lastSentBeforeDelete = gt06LastSentCmds.get(ctx.imei);
       // El comando fue recibido y ejecutado — ya no hace falta re-encolarlo en 'close'
       gt06LastSentCmds.delete(ctx.imei);
 
@@ -614,9 +611,7 @@ function handleFrame(socket, ctx, remote, frame) {
 
       } else if (resp.text.startsWith('DEFENSE_OK')) {
         // Respuesta a DEFENSE,1# o DEFENSE,0# — el device confirmó el cambio de estado.
-        // Se usa el último comando enviado para saber si fue ARM o DISARM.
-        const lastCmd = gt06LastSentCmds.get(ctx.imei);
-        const armed   = lastCmd?.text === 'DEFENSE,1#';
+        const armed = lastSentBeforeDelete?.text === 'DEFENSE,1#';
         DeviceState.findOneAndUpdate(
           { deviceId: ctx.imei },
           { armed, updatedAt: new Date() },
