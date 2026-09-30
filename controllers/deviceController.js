@@ -32,6 +32,7 @@ const Gps = require('../models/Gps');
 const Alert = require('../models/Alert');
 const DeviceState = require('../models/DeviceState');
 const { connectedDevices, sendCommand, getIo } = require('../tcp/tcpServer');
+const { gt06OnlineImeis } = require('../tcp/gt06Server');
 
 /**
  * Whitelist de comandos válidos que el servidor acepta y puede transmitir al ESP32.
@@ -114,7 +115,8 @@ const getDeviceStatus = async (req, res) => {
     // Es la fuente de verdad para "¿está conectado ahora mismo?".
     // Si el socket existía pero se destruyó, el handler 'close' de tcpServer.js
     // ya lo eliminó del Map, así que esta información es siempre precisa.
-    const connected = connectedDevices.has(deviceId);
+    // GT06 devices (J16 y clones) se rastrean en gt06OnlineImeis en lugar de connectedDevices
+    const connected = connectedDevices.has(deviceId) || gt06OnlineImeis.has(deviceId);
 
     // Ejecutar las dos queries en paralelo: no tienen dependencia entre sí
     // y hacerlas secuenciales añadiría latencia innecesaria al endpoint.

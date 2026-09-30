@@ -53,6 +53,13 @@ const RATE_LIMIT_MS   = 3_000;   // intervalo mínimo entre ubicaciones aceptada
 /** @type {Map<net.Socket, {imei: string|null, loginOk: boolean, failedAttempts: number, lastLocationMs: number, buf: Buffer}>} */
 const gt06ConnectedDevices = new Map();
 
+/**
+ * IMEIs de dispositivos GT06 actualmente autenticados y conectados.
+ * Keyed by IMEI (string) → true. Se usa en deviceController para reportar connected=true.
+ * @type {Map<string, true>}
+ */
+const gt06OnlineImeis = new Map();
+
 /** @type {import('socket.io').Server|null} */
 let _io = null;
 
@@ -134,6 +141,7 @@ function makeSocketHandler(socket) {
 
   socket.on('close', () => {
     gt06ConnectedDevices.delete(socket);
+    if (ctx.imei) gt06OnlineImeis.delete(ctx.imei);
     log('info', 'gt06.disconnect', { remote, imei: ctx.imei });
   });
 }
@@ -182,6 +190,7 @@ function handleFrame(socket, ctx, remote, frame) {
 
         ctx.imei    = imei;
         ctx.loginOk = true;
+        gt06OnlineImeis.set(imei, true);
         log('info', 'gt06.login.ok', { remote, imei });
 
         // Responder ACK — el device entra en loop de reconexión si no recibe esto en 5s
@@ -332,7 +341,7 @@ function startGt06Server(io) {
 }
 
 // ─── EXPORTS ─────────────────────────────────────────────────────────────────
-module.exports = { startGt06Server, gt06ConnectedDevices };
+module.exports = { startGt06Server, gt06ConnectedDevices, gt06OnlineImeis };
 
 
 /* ═══════════════════════════════════════════════════════════
