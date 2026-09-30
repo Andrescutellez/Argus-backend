@@ -68,10 +68,12 @@ const VALID_COMMANDS = [
   'SENSITIVITY_MEDIUM',
   'SENSITIVITY_HIGH',
   'SENSITIVITY_VERY_HIGH',
-  // Diagnóstico GT06 temporal — vibration alarm
+  // Diagnóstico GT06 temporal — vibration alarm + status
   'SENALM_QUERY',
   'SENALM_ON',
   'SENALM_OFF',
+  'STATUS_QUERY',
+  'PARAM_QUERY',
 ];
 
 /**

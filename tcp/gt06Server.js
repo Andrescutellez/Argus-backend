@@ -65,6 +65,9 @@ const GT06_COMMAND_MAP = {
   SENALM_QUERY:   'SENALM#',
   SENALM_ON:      'SENALM,ON,0#',  // Activar solo GPRS (sin SMS ni llamada)
   SENALM_OFF:     'SENALM,OFF#',
+  // Diagnóstico temporal — estado y parámetros del device
+  STATUS_QUERY:   'STATUS#',
+  PARAM_QUERY:    'PARAM#',
 };
 
 // ─── ESTADO COMPARTIDO ───────────────────────────────────────────────────────
