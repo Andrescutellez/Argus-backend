@@ -74,6 +74,9 @@ const VALID_COMMANDS = [
   'SENALM_OFF',
   'STATUS_QUERY',
   'PARAM_QUERY',
+  'DEFENSE_ON',
+  'DEFENSE_OFF',
+  'DEFENSE_QUERY',
 ];
 
 /**
