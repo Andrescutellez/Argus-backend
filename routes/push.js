@@ -44,7 +44,7 @@ router.post('/subscribe', authenticate, async (req, res) => {
     return res.status(400).json({ message: 'Suscripción inválida: falta endpoint' });
   }
   try {
-    await saveWebPushSub(req.user.id, sub);
+    await saveWebPushSub(req.user.sub, sub);
     res.json({ ok: true });
   } catch (err) {
     console.error('[Push] Error guardando suscripción:', err.message);
