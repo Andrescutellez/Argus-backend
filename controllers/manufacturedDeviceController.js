@@ -18,6 +18,7 @@
 'use strict';
 
 const ManufacturedDevice = require('../models/ManufacturedDevice');
+const User = require('../models/User');
 const { log } = require('../models/AuditLog');
 
 /**
@@ -98,4 +99,39 @@ const removeDevice = async (req, res) => {
   }
 };
 
-module.exports = { addDevice, listDevices, removeDevice };
+/**
+ * @brief Actualiza el protocolo de un device existente en el catálogo.
+ * @param {import('express').Request}  req  Params: { deviceId } | Body: { protocol }
+ * @param {import('express').Response} res  200: device actualizado | 400 | 404
+ */
+const patchDevice = async (req, res) => {
+  const { deviceId } = req.params;
+  const { protocol } = req.body ?? {};
+
+  if (!VALID_PROTOCOLS.includes(protocol)) {
+    return res.status(400).json({ message: `protocol debe ser: ${VALID_PROTOCOLS.join(', ')}` });
+  }
+
+  try {
+    const device = await ManufacturedDevice.updateProtocol(deviceId, protocol);
+    if (!device) return res.status(404).json({ message: 'Device no encontrado' });
+
+    // Propagar el cambio a todos los user_devices vinculados
+    await User.updateDeviceProtocol(deviceId, protocol);
+
+    await log({
+      userId: req.user.sub,
+      action: 'MANUFACTURED_DEVICE_PATCH',
+      targetType: 'manufactured_device',
+      targetId: deviceId,
+      metadata: { protocol },
+    });
+
+    return res.status(200).json(device);
+  } catch (err) {
+    console.error('[MANUFACTURED] patchDevice error:', err.message);
+    return res.status(500).json({ message: 'Error interno del servidor' });
+  }
+};
+
+module.exports = { addDevice, listDevices, removeDevice, patchDevice };

@@ -13,7 +13,7 @@
 
 const { Router } = require('express');
 const { authenticate, requireRole } = require('../middleware/auth');
-const { addDevice, listDevices, removeDevice } = require('../controllers/manufacturedDeviceController');
+const { addDevice, listDevices, removeDevice, patchDevice } = require('../controllers/manufacturedDeviceController');
 
 const router = Router();
 
@@ -29,6 +29,13 @@ router.post('/',
   authenticate,
   requireRole('SUPER_ADMIN'),
   addDevice,
+);
+
+// PATCH /api/manufactured/:deviceId — editar protocolo de un device (SUPER_ADMIN)
+router.patch('/:deviceId',
+  authenticate,
+  requireRole('SUPER_ADMIN'),
+  patchDevice,
 );
 
 // DELETE /api/manufactured/:deviceId — revocar un device (SUPER_ADMIN)

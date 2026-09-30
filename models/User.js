@@ -78,6 +78,17 @@ async function addDevice(userId, deviceId, protocol = 'argus') {
 }
 
 /**
+ * @brief Actualiza el protocol de todos los user_devices que apunten a un deviceId.
+ * Se llama cuando el SUPER_ADMIN cambia el protocolo desde el inventario.
+ */
+async function updateDeviceProtocol(deviceId, protocol) {
+  await getPool().query(
+    `UPDATE user_devices SET device_protocol = $2 WHERE device_id = $1`,
+    [deviceId, protocol],
+  );
+}
+
+/**
  * @brief Retorna los devices asociados a un usuario con su protocolo.
  * @param {string} userId  UUID
  * @returns {Promise<{id: string, protocol: string}[]>}
@@ -224,4 +235,4 @@ async function getOwnerPushDataByDeviceId(deviceId) {
   return rows[0] ?? null;
 }
 
-module.exports = { findByEmail, findById, createUser, addDevice, getDevices, getDeviceOwner, getAllUsersWithDevices, findAllByRole, saveFcmToken, getOwnerByDeviceId, saveWebPushSub, getOwnerPushDataByDeviceId };
+module.exports = { findByEmail, findById, createUser, addDevice, updateDeviceProtocol, getDevices, getDeviceOwner, getAllUsersWithDevices, findAllByRole, saveFcmToken, getOwnerByDeviceId, saveWebPushSub, getOwnerPushDataByDeviceId };

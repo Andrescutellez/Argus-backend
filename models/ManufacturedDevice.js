@@ -83,6 +83,14 @@ async function listAll() {
   return rows;
 }
 
+async function updateProtocol(deviceId, protocol) {
+  const { rows } = await getPool().query(
+    `UPDATE manufactured_devices SET device_protocol = $2 WHERE device_id = $1 RETURNING *`,
+    [deviceId, protocol],
+  );
+  return rows[0] ?? null;
+}
+
 async function getProtocol(deviceId) {
   const { rows } = await getPool().query(
     `SELECT device_protocol FROM manufactured_devices WHERE device_id = $1 LIMIT 1`,
@@ -110,7 +118,7 @@ async function removeDevice(deviceId) {
   return rowCount > 0;
 }
 
-module.exports = { addDevice, isManufactured, listAll, getProtocol, removeDevice };
+module.exports = { addDevice, isManufactured, listAll, getProtocol, updateProtocol, removeDevice };
 
 
 /* ═══════════════════════════════════════════════════════════
