@@ -7,3 +7,10 @@ CLAUDE.md
 .wrangler/
 # Certificados TLS — nunca subir al repo
 certs/*.pem
+
+# Service accounts y credenciales GCP/Firebase — nunca al repo
+config/firebase-service-account.json
+config/*adminsdk*.json
+config/*service-account*.json
+# Plantillas/ejemplos sí se trackean
+!config/*.example.json
