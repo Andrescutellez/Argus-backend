@@ -68,9 +68,11 @@ const CRC_TABLE = [
 ];
 
 // ─── PROTOCOL NUMBERS ────────────────────────────────────────────────────────
-const PROTO_LOGIN     = 0x01;
-const PROTO_LOCATION  = 0x12;
-const PROTO_HEARTBEAT = 0x13;
+const PROTO_LOGIN           = 0x01;
+const PROTO_LOCATION        = 0x12;
+const PROTO_HEARTBEAT       = 0x13;
+const PROTO_STRING_RESPONSE = 0x15; // Terminal → Servidor: respuesta a comando del servidor
+const PROTO_SERVER_COMMAND  = 0x80; // Servidor → Terminal: comando SMS (DYD/HFYD/DWXX)
 
 /**
  * @brief CRC-ITU-T (CRC-16) sobre un Buffer.
@@ -334,17 +336,101 @@ function buildAck(protocol, serial) {
   return ack;
 }
 
+/**
+ * @brief Construye un frame de comando del servidor (Protocol 0x80) para enviar
+ *        texto SMS-like al terminal GT06.
+ *
+ * PROPÓSITO:
+ *   El servidor usa este frame para enviar comandos como `DYD,000000#`
+ *   (cortar motor) o `HFYD,000000#` (restaurar motor). El terminal lo ejecuta
+ *   como si fuera un SMS recibido y responde con un frame 0x15 con el resultado.
+ *
+ * ESTRUCTURA DEL FRAME:
+ *   78 78 | LEN | 80 | CMD_LEN | SERVER_FLAG(4) | COMMAND_ASCII(M) | SN(2) | CRC(2) | 0D 0A
+ *   - CMD_LEN = 4 (SERVER_FLAG) + M (texto del comando)
+ *   - LEN = PROTO(1) + CMD_LEN_byte(1) + SERVER_FLAG(4) + M + SN(2) + CRC(2) = M + 10
+ *   - CRC cubre desde LEN hasta último byte de SN (igual que todos los frames GT06)
+ *
+ * VERIFICACIÓN contra spec Apéndice B (DYD, M=11):
+ *   LEN = 11+10 = 21 = 0x15 ✓, CMD_LEN = 11+4 = 15 = 0x0F ✓, total = 26 bytes ✓
+ *
+ * DEPENDENCIAS:
+ *   - crcBuffer(): CRC-ITU sobre el rango LEN→SN
+ *
+ * @param {string} commandText - Comando ASCII, e.g. 'DYD,000000#'
+ * @param {number} serverFlag  - uint32 devuelto sin cambio en la respuesta 0x15 (correlación)
+ * @param {number} serial      - uint16, número de serie del frame (SN)
+ * @returns {Buffer} Frame completo listo para socket.write()
+ */
+function buildServerCommand(commandText, serverFlag, serial) {
+  const cmd = Buffer.from(commandText, 'ascii');
+  const M   = cmd.length;
+  // LEN = PROTO(1) + DATA(1+4+M) + SN(2) + CRC(2) = M + 10
+  const len = M + 10;
+  const buf = Buffer.alloc(M + 15); // total: 2(start) + 1(LEN) + len + 2(stop)
+
+  buf[0] = 0x78;
+  buf[1] = 0x78;
+  buf[2] = len;
+  buf[3] = 0x80;          // Protocol: Server Command
+  buf[4] = M + 4;         // CMD_LEN = SERVER_FLAG(4) + command(M)
+  buf.writeUInt32BE(serverFlag >>> 0, 5);  // SERVER_FLAG: terminal lo devuelve igual
+  cmd.copy(buf, 9);                         // COMMAND_ASCII
+  buf.writeUInt16BE(serial & 0xFFFF, 9 + M);
+  // CRC: desde LEN (índice 2) hasta último byte de SN (índice 9+M+1), exclusive
+  buf.writeUInt16BE(crcBuffer(buf.slice(2, 9 + M + 2)), 9 + M + 2);
+  buf[9 + M + 4] = 0x0D;
+  buf[9 + M + 5] = 0x0A;
+  return buf;
+}
+
+/**
+ * @brief Decodifica el campo DATA de un frame 0x15 (String Response) enviado por el terminal.
+ *
+ * PROPÓSITO:
+ *   El terminal responde con 0x15 después de recibir un 0x80 del servidor.
+ *   El campo `text` contiene el resultado del comando, e.g.:
+ *   - `DYD=Success!`     → motor cortado exitosamente
+ *   - `DYD=Speed Limit`  → rechazado (velocidad > 20 km/h)
+ *   - `HFYD=Success!`    → motor restaurado
+ *   - `HFYD=Fail!`       → falla al restaurar
+ *
+ * ESTRUCTURA DATA del frame 0x15:
+ *   CMD_LEN(1) | SERVER_FLAG(4) | response_text(CMD_LEN-4) | LANGUAGE(2)
+ *   El SERVER_FLAG es el mismo que envió el servidor en el 0x80 correspondiente.
+ *
+ * DEPENDENCIAS: ninguna (solo lectura de Buffer)
+ *
+ * @param {Buffer} data - Campo DATA del frame (mínimo 7 bytes)
+ * @returns {{ serverFlag: number, text: string, language: number }}
+ * @throws {Error} si data es demasiado corto o está truncado
+ */
+function decodeStringResponse(data) {
+  if (data.length < 7) throw new Error(`String response too short: ${data.length}`);
+  const cmdLen = data[0];
+  if (data.length < 1 + cmdLen + 2) throw new Error(`String response truncated: data=${data.length}, expected=${1 + cmdLen + 2}`);
+  const serverFlag = data.readUInt32BE(1);
+  const textLen    = cmdLen - 4;
+  const text       = data.slice(5, 5 + textLen).toString('ascii');
+  const language   = data.readUInt16BE(5 + textLen);
+  return { serverFlag, text, language };
+}
+
 // ─── EXPORTS ─────────────────────────────────────────────────────────────────
 module.exports = {
   PROTO_LOGIN,
   PROTO_LOCATION,
   PROTO_HEARTBEAT,
+  PROTO_STRING_RESPONSE,
+  PROTO_SERVER_COMMAND,
   crcBuffer,
   parseFrames,
   decodeLogin,
   decodeLocation,
   decodeHeartbeat,
   buildAck,
+  buildServerCommand,
+  decodeStringResponse,
 };
 
 
@@ -392,7 +478,7 @@ module.exports = {
    - Fórmula lat/lon: raw = (grados*60+minutos)*30000. Invertir correctamente.
 
    DEUDA TÉCNICA:
-   - El Alarm Packet (0x16) no está implementado (Fase 2).
+   - El Alarm Packet (0x16) no está implementado (Fase 3).
    - No se parsea el GPS info length del nibble alto del byte GPS Info.
 
    ═══════════════════════════════════════════════════════════ */

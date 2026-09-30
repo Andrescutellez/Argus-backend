@@ -19,9 +19,13 @@ const {
   decodeLocation,
   decodeHeartbeat,
   buildAck,
+  buildServerCommand,
+  decodeStringResponse,
   PROTO_LOGIN,
   PROTO_LOCATION,
   PROTO_HEARTBEAT,
+  PROTO_STRING_RESPONSE,
+  PROTO_SERVER_COMMAND,
 } = require('../tcp/gt06Parser');
 
 // ─── PAQUETES DE REFERENCIA (spec GT06 Apéndice B) ───────────────────────────
@@ -376,5 +380,124 @@ describe('buildAck', () => {
     const crc = crcBuffer(crcInput);
     const crcInPacket = ack.readUInt16BE(6);
     assert.strictEqual(crc, crcInPacket);
+  });
+});
+
+// ─── PAQUETES DE REFERENCIA — COMANDOS (spec GT06 Apéndice B) ─────────────────
+// DYD server→device: 78 78 15 80 0F 00 01 A9 58 44 59 44 2C 30 30 30 30 30 30 23 00 A0 DC F1 0D 0A
+const DYD_CMD_PKT = Buffer.from('787815800F0001A95844594 42C30303030303023 00A0DCF10D0A'.replace(/\s/g, ''), 'hex');
+// DYD device→server response: 78 78 18 15 10 00 01 A9 58 44 59 44 3D 53 75 63 63 65 73 73 21 00 02 00 18 91 77 0D 0A
+const DYD_RESP_PKT = Buffer.from('7878181510 0001A958 4459443D53756363657373210002 0018 9177 0D0A'.replace(/\s/g, ''), 'hex');
+// HFYD server→device: 78 78 16 80 10 00 01 A9 63 48 46 59 44 2C 30 30 30 30 30 30 23 00 A0 7B DC 0D 0A
+const HFYD_CMD_PKT = Buffer.from('787816801000 01A963 484659442C303030303030 2300A07BDC0D0A'.replace(/\s/g, ''), 'hex');
+// HFYD device→server response: 78 78 19 15 11 00 01 A9 63 48 46 59 44 3D 53 75 63 63 65 73 73 21 00 02 00 1E F8 93 0D 0A
+const HFYD_RESP_PKT = Buffer.from('78781915110001A963484659443D5375636365737321000200 1EF8930D0A'.replace(/\s/g, ''), 'hex');
+
+// ─── TESTS buildServerCommand ─────────────────────────────────────────────────
+
+describe('buildServerCommand', () => {
+  test('DYD exacto: serverFlag=0x0001A958, serial=0x00A0 → spec bytes', () => {
+    const frame = buildServerCommand('DYD,000000#', 0x0001A958, 0x00A0);
+    assert.deepStrictEqual(frame, DYD_CMD_PKT);
+  });
+
+  test('HFYD exacto: serverFlag=0x0001A963, serial=0x00A0 → spec bytes', () => {
+    const frame = buildServerCommand('HFYD,000000#', 0x0001A963, 0x00A0);
+    assert.deepStrictEqual(frame, HFYD_CMD_PKT);
+  });
+
+  test('Frame empieza con 78 78', () => {
+    const frame = buildServerCommand('DYD,000000#', 1, 1);
+    assert.strictEqual(frame[0], 0x78);
+    assert.strictEqual(frame[1], 0x78);
+  });
+
+  test('Frame termina con 0D 0A', () => {
+    const frame = buildServerCommand('DYD,000000#', 1, 1);
+    assert.strictEqual(frame[frame.length - 2], 0x0D);
+    assert.strictEqual(frame[frame.length - 1], 0x0A);
+  });
+
+  test('Protocol byte = 0x80', () => {
+    const frame = buildServerCommand('DYD,000000#', 1, 1);
+    assert.strictEqual(frame[3], PROTO_SERVER_COMMAND);
+  });
+
+  test('LEN correcto: M=11 → LEN=21', () => {
+    // 'DYD,000000#' = 11 chars → LEN = 11+10 = 21
+    const frame = buildServerCommand('DYD,000000#', 1, 1);
+    assert.strictEqual(frame[2], 21);
+  });
+
+  test('LEN correcto: M=12 → LEN=22', () => {
+    // 'HFYD,000000#' = 12 chars → LEN = 12+10 = 22
+    const frame = buildServerCommand('HFYD,000000#', 1, 1);
+    assert.strictEqual(frame[2], 22);
+  });
+
+  test('CMD_LEN correcto: DYD → 4+11=15', () => {
+    const frame = buildServerCommand('DYD,000000#', 1, 1);
+    assert.strictEqual(frame[4], 15);
+  });
+
+  test('SERVER_FLAG se escribe correctamente en big-endian', () => {
+    const frame = buildServerCommand('DYD,000000#', 0xDEADBEEF, 1);
+    assert.strictEqual(frame.readUInt32BE(5), 0xDEADBEEF);
+  });
+
+  test('COMMAND_ASCII correcto (DYD,000000#)', () => {
+    const frame = buildServerCommand('DYD,000000#', 1, 1);
+    const text = frame.slice(9, 9 + 11).toString('ascii');
+    assert.strictEqual(text, 'DYD,000000#');
+  });
+
+  test('CRC se auto-verifica: parseFrames puede parsear el frame generado', () => {
+    const frame = buildServerCommand('DYD,000000#', 0x0001A958, 0x00A0);
+    const { frames } = parseFrames(frame);
+    assert.strictEqual(frames.length, 1);
+    assert.strictEqual(frames[0].crcOk, true);
+    assert.strictEqual(frames[0].protocol, PROTO_SERVER_COMMAND);
+  });
+
+  test('Total bytes: DYD (M=11) → 26 bytes', () => {
+    assert.strictEqual(buildServerCommand('DYD,000000#', 1, 1).length, 26);
+  });
+
+  test('Total bytes: HFYD (M=12) → 27 bytes', () => {
+    assert.strictEqual(buildServerCommand('HFYD,000000#', 1, 1).length, 27);
+  });
+});
+
+// ─── TESTS decodeStringResponse ───────────────────────────────────────────────
+
+describe('decodeStringResponse', () => {
+  test('DYD=Success!: serverFlag=0x0001A958, text correcto, language=2', () => {
+    const { frames } = parseFrames(DYD_RESP_PKT);
+    assert.strictEqual(frames.length, 1);
+    assert.strictEqual(frames[0].protocol, PROTO_STRING_RESPONSE);
+    assert.strictEqual(frames[0].crcOk, true);
+
+    const resp = decodeStringResponse(frames[0].data);
+    assert.strictEqual(resp.serverFlag, 0x0001A958);
+    assert.strictEqual(resp.text, 'DYD=Success!');
+    assert.strictEqual(resp.language, 2); // Inglés
+  });
+
+  test('HFYD=Success!: serverFlag=0x0001A963, text correcto', () => {
+    const { frames } = parseFrames(HFYD_RESP_PKT);
+    const resp = decodeStringResponse(frames[0].data);
+    assert.strictEqual(resp.serverFlag, 0x0001A963);
+    assert.strictEqual(resp.text, 'HFYD=Success!');
+  });
+
+  test('Buffer menor a 7 bytes → lanza error', () => {
+    assert.throws(() => decodeStringResponse(Buffer.from([0x10, 0x00, 0x01])), /too short/);
+  });
+
+  test('Buffer truncado (data.length < 1 + cmdLen + 2) → lanza error', () => {
+    // cmdLen = 16 → necesita 1+16+2 = 19 bytes; pasar solo 10
+    const bad = Buffer.alloc(10);
+    bad[0] = 16; // cmdLen
+    assert.throws(() => decodeStringResponse(bad), /truncated/);
   });
 });

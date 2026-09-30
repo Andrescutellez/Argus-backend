@@ -32,7 +32,7 @@ const Gps = require('../models/Gps');
 const Alert = require('../models/Alert');
 const DeviceState = require('../models/DeviceState');
 const { connectedDevices, sendCommand, getIo } = require('../tcp/tcpServer');
-const { gt06OnlineImeis } = require('../tcp/gt06Server');
+const { gt06OnlineImeis, sendGt06Command }      = require('../tcp/gt06Server');
 
 /**
  * Whitelist de comandos válidos que el servidor acepta y puede transmitir al ESP32.
@@ -299,10 +299,12 @@ const postCommand = (req, res) => {
     });
   }
 
-  // sendCommand() intenta entregar el comando al device via TCP.
-  // Retorna true si el deviceId tiene una cola (fue registrado en algún momento).
-  // Retorna false si el deviceId es desconocido (nunca se conectó a este servidor).
-  const delivered = sendCommand(deviceId, command);
+  // Intentar el path ESP32 primero (commandQueues de tcpServer).
+  // Si el deviceId nunca se conectó como ESP32, intentar el path GT06.
+  // Para GT06: ENGINE_CUT → DYD,000000# / ENGINE_RESTORE → HFYD,000000# (frame binario 0x80).
+  // ARM/DISARM/SIREN_*/SENSITIVITY_* en GT06 son comandos "lógicos" — solo DeviceState.
+  let delivered = sendCommand(deviceId, command);
+  if (!delivered) delivered = sendGt06Command(deviceId, command);
 
   // Construir el actor desde el JWT: quién envió el comando, desde qué plataforma.
   // req.body.platform es opcional — el frontend puede informar 'app' o 'web'.

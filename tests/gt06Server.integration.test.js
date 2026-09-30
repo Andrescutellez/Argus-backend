@@ -28,6 +28,7 @@ const mockState = {
   enqueueCalls: [],
   isAllowedImei: null,
   isAllowedReturn: true,
+  deviceStateCalls: [],
 };
 
 // Mock de deviceAuth
@@ -57,9 +58,25 @@ require.cache[queuePath] = {
   },
 };
 
+// Mock de DeviceState — captura llamadas a findOneAndUpdate sin conectar a MongoDB
+const deviceStatePath = require.resolve('../models/DeviceState');
+require.cache[deviceStatePath] = {
+  id: deviceStatePath,
+  filename: deviceStatePath,
+  loaded: true,
+  exports: {
+    findOneAndUpdate: (filter, update, options) => {
+      mockState.deviceStateCalls.push({ filter, update, options });
+      return Promise.resolve(null);
+    },
+  },
+};
+
 // Ahora cargar el servidor con los mocks aplicados
-const { startGt06Server, gt06ConnectedDevices } = require('../tcp/gt06Server');
-const { buildAck, PROTO_LOGIN, PROTO_HEARTBEAT } = require('../tcp/gt06Parser');
+const { startGt06Server, gt06ConnectedDevices, sendGt06Command } = require('../tcp/gt06Server');
+const {
+  buildAck, PROTO_LOGIN, PROTO_HEARTBEAT, PROTO_SERVER_COMMAND,
+} = require('../tcp/gt06Parser');
 
 // ─── PAQUETES DE REFERENCIA ──────────────────────────────────────────────────
 
@@ -85,6 +102,12 @@ const LOCATION_PKT = Buffer.from(
 
 // Heartbeat: 78 78 0A 13 44 01 04 00 01 0005 0845 0D0A
 const HEARTBEAT_PKT = Buffer.from('78780A134401040001' + '0005' + '0845' + '0D0A', 'hex');
+
+// DYD=Success! respuesta del device (frame 0x15, CRC válido del Apéndice B del spec GT06)
+// 78 78 18 15 10 00 01 A9 58 44 59 44 3D 53 75 63 63 65 73 73 21 00 02 00 18 91 77 0D 0A
+const DYD_SUCCESS_RESP_PKT = Buffer.from(
+  '7878 18 15 10 0001A958 4459443D5375636365737321 0002 0018 9177 0D0A'.replace(/\s/g, ''), 'hex'
+);
 
 // ─── SERVIDOR Y UTILIDADES ───────────────────────────────────────────────────
 
@@ -144,6 +167,7 @@ beforeEach(() => {
   mockState.enqueueCalls = [];
   mockState.isAllowedImei = null;
   mockState.isAllowedReturn = true;
+  mockState.deviceStateCalls = [];
 });
 
 // ─── TESTS ───────────────────────────────────────────────────────────────────
@@ -330,5 +354,98 @@ describe('GT06 Server — flujo completo', () => {
 
     // El Map debe volver a su tamaño anterior tras desconectar
     assert.strictEqual(gt06ConnectedDevices.size, sizeBefore);
+  });
+});
+
+describe('GT06 Server — comandos Fase 2', () => {
+
+  test('sendGt06Command con IMEI desconocido → retorna false', () => {
+    const result = sendGt06Command('000000000000000', 'ENGINE_CUT');
+    assert.strictEqual(result, false, 'IMEI que nunca conectó debe retornar false');
+  });
+
+  test('ARM es lógico — sendGt06Command retorna true sin enviar frame al device', async () => {
+    const socket = await connect();
+    socket.write(LOGIN_PKT_OK);
+    await readBytes(socket, 10);
+    await sleep(100);
+
+    const result = sendGt06Command('867689067010506', 'ARM');
+    assert.strictEqual(result, true);
+
+    // ARM no tiene frame GT06 equivalente; no debe llegar ningún byte al device
+    let gotData = false;
+    await new Promise((resolve) => {
+      socket.once('data', () => { gotData = true; resolve(); });
+      setTimeout(resolve, 300);
+    });
+    assert.strictEqual(gotData, false, 'ARM no debe enviar frame binario al device');
+
+    socket.destroy();
+  });
+
+  test('ENGINE_CUT: login → comando → 0x80 enviado → respuesta 0x15 → DeviceState motorCut=true', async () => {
+    const socket = await connect();
+    socket.write(LOGIN_PKT_OK);
+    await readBytes(socket, 10); // ACK login
+    await sleep(100);            // esperar que el login async complete (gt06ImeiSockets set)
+
+    const sent = sendGt06Command('867689067010506', 'ENGINE_CUT');
+    assert.strictEqual(sent, true);
+
+    // El servidor escribe un frame 0x80 al device.
+    // DYD,000000# = 11 chars → LEN = 11+10 = 21 → frame total = 11+15 = 26 bytes
+    const cmdFrame = await readBytes(socket, 26);
+
+    assert.strictEqual(cmdFrame[0], 0x78,                 'start byte 1');
+    assert.strictEqual(cmdFrame[1], 0x78,                 'start byte 2');
+    assert.strictEqual(cmdFrame[2], 11 + 10,              'LEN = M + 10 = 21');
+    assert.strictEqual(cmdFrame[3], PROTO_SERVER_COMMAND, 'protocol = 0x80');
+    assert.strictEqual(cmdFrame[4], 11 + 4,               'CMD_LEN = M + 4 = 15');
+    assert.strictEqual(cmdFrame[24], 0x0D,                'end byte 1');
+    assert.strictEqual(cmdFrame[25], 0x0A,                'end byte 2');
+    assert.strictEqual(cmdFrame.slice(9, 20).toString('ascii'), 'DYD,000000#', 'command text');
+
+    // Device responde DYD=Success! (frame 0x15 con CRC válido del spec)
+    socket.write(DYD_SUCCESS_RESP_PKT);
+    await sleep(100);
+
+    // El handler debe haber llamado DeviceState.findOneAndUpdate con motorCut: true
+    assert.strictEqual(mockState.deviceStateCalls.length, 1, 'findOneAndUpdate debe ser llamado una vez');
+    assert.deepStrictEqual(
+      mockState.deviceStateCalls[0].filter,
+      { deviceId: '867689067010506' },
+      'filter por deviceId',
+    );
+    assert.strictEqual(mockState.deviceStateCalls[0].update.motorCut, true, 'motorCut debe ser true');
+
+    socket.destroy();
+  });
+
+  test('ENGINE_CUT encolado — se entrega automáticamente en la próxima reconexión', async () => {
+    // Primera conexión: solo para registrar el IMEI en gt06CommandQueues
+    const s1 = await connect();
+    s1.write(LOGIN_PKT_OK);
+    await readBytes(s1, 10);
+    await sleep(100);
+    s1.destroy();
+    await sleep(100); // esperar que el 'close' limpie gt06OnlineImeis e gt06ImeiSockets
+
+    // Encolar el comando mientras el device está offline
+    const queued = sendGt06Command('867689067010506', 'ENGINE_CUT');
+    assert.strictEqual(queued, true, 'debe aceptar el comando aunque el device esté offline');
+
+    // Segunda conexión: el servidor envía ACK (10 bytes) + 0x80 frame (26 bytes) en el mismo
+    // handler del login — ambos llegan juntos, leer los 36 bytes de una sola vez.
+    const s2 = await connect();
+    s2.write(LOGIN_PKT_OK);
+
+    const all = await readBytes(s2, 36);
+    const cmdFrame = all.slice(10, 36); // los primeros 10 son el ACK del login
+
+    assert.strictEqual(cmdFrame[3], PROTO_SERVER_COMMAND, 'protocol = 0x80');
+    assert.strictEqual(cmdFrame.slice(9, 20).toString('ascii'), 'DYD,000000#', 'command text');
+
+    s2.destroy();
   });
 });

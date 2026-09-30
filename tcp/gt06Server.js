@@ -32,12 +32,15 @@
 'use strict';
 
 const net = require('net');
-const { log }       = require('./logger');
-const { isAllowed } = require('./deviceAuth');
-const { enqueue }   = require('./queue');
+const { log }        = require('./logger');
+const { isAllowed }  = require('./deviceAuth');
+const { enqueue }    = require('./queue');
+const DeviceState    = require('../models/DeviceState');
 const {
   PROTO_LOGIN, PROTO_LOCATION, PROTO_HEARTBEAT,
+  PROTO_STRING_RESPONSE, PROTO_SERVER_COMMAND,
   parseFrames, decodeLogin, decodeLocation, decodeHeartbeat, buildAck,
+  buildServerCommand, decodeStringResponse,
 } = require('./gt06Parser');
 
 // ─── CONSTANTES DE CONFIGURACIÓN ─────────────────────────────────────────────
@@ -47,6 +50,18 @@ const INACTIVITY_MS   = 600_000; // 10 minutos — el device envía heartbeat ca
 const MAX_BUFFER_BYTES= 1024;    // protección contra memory exhaustion por clientes maliciosos
 const MAX_FAILED_AUTH = 3;       // intentos de login con IMEI no registrado antes de cerrar
 const RATE_LIMIT_MS   = 3_000;   // intervalo mínimo entre ubicaciones aceptadas
+
+// ─── MAPEO DE COMANDOS ARGUS → GT06 ──────────────────────────────────────────
+
+/**
+ * Traduce los nombres de comando del sistema Argus al texto SMS que entiende el GT06.
+ * Los comandos no listados aquí (ARM, DISARM, SIREN_*) son "lógicos" — solo actualizan
+ * DeviceState en el backend, sin frame físico al device (el GT06 no los soporta).
+ */
+const GT06_COMMAND_MAP = {
+  ENGINE_CUT:     'DYD,000000#',   // Cortar combustible. Rechazado si velocidad > 20 km/h.
+  ENGINE_RESTORE: 'HFYD,000000#',  // Restaurar combustible.
+};
 
 // ─── ESTADO COMPARTIDO ───────────────────────────────────────────────────────
 
@@ -60,8 +75,145 @@ const gt06ConnectedDevices = new Map();
  */
 const gt06OnlineImeis = new Map();
 
+/**
+ * Socket activo por IMEI. Necesario para que sendGt06Command() pueda escribir
+ * directamente al socket sin iterar gt06ConnectedDevices.
+ * @type {Map<string, net.Socket>}
+ */
+const gt06ImeiSockets = new Map();
+
+/**
+ * Cola de comandos pendientes por IMEI (texto SMS GT06 ya resuelto, e.g. 'DYD,000000#').
+ * Persiste a través de reconexiones — si el device se desconecta con comandos pendientes,
+ * se entregan en la próxima conexión durante el login.
+ * @type {Map<string, string[]>}
+ */
+const gt06CommandQueues = new Map();
+
+/**
+ * Último comando enviado por IMEI, no confirmado aún por un 0x15 del device.
+ * Si el socket cierra sin recibir 0x15, el comando se re-encola al frente.
+ * @type {Map<string, { text: string, flag: number }>}
+ */
+const gt06LastSentCmds = new Map();
+
+/**
+ * Contador global de seriales de comandos del servidor.
+ * Se usa como SERVER_FLAG (uint32) y SN (uint16) en buildServerCommand.
+ * Incrementa con cada comando enviado — no necesita persistir entre reinicios
+ * porque el device no requiere continuidad en los seriales del servidor.
+ */
+let _serverCmdSerial = 1;
+
 /** @type {import('socket.io').Server|null} */
 let _io = null;
+
+// ─── COLA DE COMANDOS ────────────────────────────────────────────────────────
+
+/**
+ * @brief Despacha el siguiente comando pendiente de la cola al device GT06.
+ *
+ * PROPÓSITO:
+ *   Tomar el primer comando de gt06CommandQueues para este IMEI y escribirlo
+ *   al socket como frame 0x80 (Server Command). Si el device no está listo
+ *   (no pasó login o el socket está destruido), no hace nada.
+ *
+ * FLUJO LÓGICO:
+ *   1. Verificar que ctx.loginOk y ctx.imei estén set.
+ *   2. Obtener la cola; si está vacía, retornar.
+ *   3. Sacar el primer texto con shift() — política FIFO.
+ *   4. Construir el frame 0x80 con buildServerCommand.
+ *   5. Escribir al socket; si falla, re-encolar al frente.
+ *   6. Guardar en gt06LastSentCmds para re-enqueue si el socket cierra antes del ACK.
+ *
+ * DEPENDENCIAS:
+ *   - gt06CommandQueues: Map<imei, string[]>
+ *   - gt06LastSentCmds: Map<imei, {text, flag}>
+ *   - buildServerCommand(): construye el frame binario
+ *   - _serverCmdSerial: contador global de frames de servidor
+ *
+ * @param {net.Socket} socket
+ * @param {{ imei: string, loginOk: boolean }} ctx
+ */
+function flushGt06Commands(socket, ctx) {
+  if (!ctx || !ctx.loginOk || !ctx.imei) return;
+
+  const q = gt06CommandQueues.get(ctx.imei);
+  if (!q || q.length === 0) return;
+
+  const cmdText = q.shift();
+  const flag    = _serverCmdSerial & 0xFFFFFFFF;
+  const sn      = flag & 0xFFFF;
+  _serverCmdSerial++;
+
+  try {
+    socket.write(buildServerCommand(cmdText, flag, sn));
+  } catch (err) {
+    // Socket ya destruido o error de escritura — re-encolar al frente para el próximo intento
+    q.unshift(cmdText);
+    log('warn', 'gt06.cmd.write.error', { imei: ctx.imei, cmd: cmdText, message: err.message });
+    return;
+  }
+
+  gt06LastSentCmds.set(ctx.imei, { text: cmdText, flag });
+  log('info', 'gt06.cmd.sent', { imei: ctx.imei, cmd: cmdText });
+}
+
+/**
+ * @brief Encola o entrega inmediatamente un comando a un device GT06.
+ *
+ * PROPÓSITO:
+ *   Interfaz pública análoga a sendCommand() de tcpServer.js, pero para el protocolo GT06.
+ *   Llamada desde deviceController.postCommand() cuando detecta que el deviceId
+ *   pertenece a un device GT06.
+ *
+ * FLUJO LÓGICO:
+ *   1. Si commandName tiene traducción en GT06_COMMAND_MAP → encolar el texto SMS.
+ *      Si no (ARM/DISARM/SIREN_x/SENSITIVITY_x) → sin frame físico, retornar true.
+ *      El caller (saveCommandAlert) ya actualizó DeviceState de forma optimista.
+ *   2. Crear cola si es la primera vez que se ve este IMEI.
+ *      Retornar false si el IMEI nunca se conectó (ni online ni en comandQueues).
+ *   3. Encolar el texto y si el socket está activo, flush inmediato.
+ *
+ * NOTA ARQUITECTÓNICA:
+ *   Para comandos sin equivalente físico (ARM/DISARM), el GT06 solo actualiza estado
+ *   lógico en backend. El estado "armado" controla si los Alarm Packets (0x16) generan
+ *   alertas o se ignoran — comportamiento análogo al ESP32 pero sin señal de hardware.
+ *
+ * @param {string} imei        - IMEI del device GT06 (usado como deviceId)
+ * @param {string} commandName - Nombre de comando Argus (e.g. 'ENGINE_CUT')
+ * @returns {boolean} true si el comando fue aceptado (enviado o encolado), false si el IMEI
+ *   es desconocido (nunca se conectó en esta sesión del servidor)
+ */
+function sendGt06Command(imei, commandName) {
+  // Si el IMEI nunca se conectó, no podemos ni encolar — igual que sendCommand() de ESP32
+  if (!gt06CommandQueues.has(imei) && !gt06OnlineImeis.has(imei)) return false;
+
+  // Asegurarse de que la cola existe (puede estar ausente si gt06OnlineImeis se set antes)
+  if (!gt06CommandQueues.has(imei)) gt06CommandQueues.set(imei, []);
+
+  const cmdText = GT06_COMMAND_MAP[commandName];
+
+  if (!cmdText) {
+    // Comando sin equivalente físico en GT06 (ARM, DISARM, SIREN_*, SENSITIVITY_*).
+    // El estado lógico ya fue actualizado en saveCommandAlert. Aceptar sin frame.
+    log('info', 'gt06.cmd.logical.only', { imei, command: commandName });
+    return true;
+  }
+
+  gt06CommandQueues.get(imei).push(cmdText);
+
+  // Entrega inmediata si el socket está activo
+  const socket = gt06ImeiSockets.get(imei);
+  if (socket && !socket.destroyed) {
+    const ctx = gt06ConnectedDevices.get(socket);
+    if (ctx && ctx.loginOk) {
+      flushGt06Commands(socket, ctx);
+    }
+  }
+
+  return true;
+}
 
 // ─── HANDLER DE SOCKET ───────────────────────────────────────────────────────
 
@@ -141,7 +293,22 @@ function makeSocketHandler(socket) {
 
   socket.on('close', () => {
     gt06ConnectedDevices.delete(socket);
-    if (ctx.imei) gt06OnlineImeis.delete(ctx.imei);
+    if (ctx.imei) {
+      gt06OnlineImeis.delete(ctx.imei);
+      gt06ImeiSockets.delete(ctx.imei);
+
+      // Si había un comando enviado sin confirmar (sin 0x15 del device), re-encolar
+      // al frente para que se entregue en la próxima reconexión.
+      const unconfirmed = gt06LastSentCmds.get(ctx.imei);
+      if (unconfirmed) {
+        const q = gt06CommandQueues.get(ctx.imei);
+        if (q) {
+          q.unshift(unconfirmed.text);
+          log('warn', 'gt06.cmd.requeued', { imei: ctx.imei, cmd: unconfirmed.text });
+        }
+        gt06LastSentCmds.delete(ctx.imei);
+      }
+    }
     log('info', 'gt06.disconnect', { remote, imei: ctx.imei });
   });
 }
@@ -191,6 +358,11 @@ function handleFrame(socket, ctx, remote, frame) {
         ctx.imei    = imei;
         ctx.loginOk = true;
         gt06OnlineImeis.set(imei, true);
+        gt06ImeiSockets.set(imei, socket);
+
+        // Crear cola de comandos si no existía (reconexión: conserva pendientes)
+        if (!gt06CommandQueues.has(imei)) gt06CommandQueues.set(imei, []);
+
         log('info', 'gt06.login.ok', { remote, imei });
 
         // Responder ACK — el device entra en loop de reconexión si no recibe esto en 5s
@@ -198,7 +370,11 @@ function handleFrame(socket, ctx, remote, frame) {
           socket.write(buildAck(PROTO_LOGIN, frame.serial));
         } catch (err) {
           log('error', 'gt06.ack.write.error', { remote, imei, message: err.message });
+          return;
         }
+
+        // Entregar comandos que quedaron pendientes de una sesión anterior
+        flushGt06Commands(socket, ctx);
       }).catch((err) => {
         log('error', 'gt06.auth.error', { remote, imei, message: err.message });
       });
@@ -299,6 +475,68 @@ function handleFrame(socket, ctx, remote, frame) {
       break;
     }
 
+    case PROTO_STRING_RESPONSE: {
+      // Respuesta del device a un comando 0x80 del servidor (e.g. 'DYD=Success!').
+      // No hay ACK del servidor para este frame — el device no espera respuesta.
+      if (!ctx.loginOk) {
+        log('warn', 'gt06.response.no.login', { remote });
+        return;
+      }
+
+      let resp;
+      try {
+        resp = decodeStringResponse(frame.data);
+      } catch (err) {
+        log('warn', 'gt06.response.decode.error', { remote, imei: ctx.imei, message: err.message });
+        break;
+      }
+
+      // El comando fue recibido y ejecutado — ya no hace falta re-encolarlo en 'close'
+      gt06LastSentCmds.delete(ctx.imei);
+
+      log('info', 'gt06.cmd.response', { imei: ctx.imei, text: resp.text });
+
+      if (resp.text.startsWith('DYD=Success')) {
+        // Corte de motor confirmado — actualizar DeviceState (la UI ya lo mostró optimista)
+        DeviceState.findOneAndUpdate(
+          { deviceId: ctx.imei },
+          { motorCut: true, updatedAt: new Date() },
+          { upsert: true },
+        ).catch(() => {});
+        if (_io) _io.to(`device:${ctx.imei}`).emit('gt06:cmd:ack', { cmd: 'ENGINE_CUT', result: 'success' });
+
+      } else if (resp.text.startsWith('DYD=Speed Limit')) {
+        // El GT06 rechaza DYD si velocidad > 20 km/h — revertir el update optimista
+        DeviceState.findOneAndUpdate(
+          { deviceId: ctx.imei },
+          { motorCut: false, updatedAt: new Date() },
+          { upsert: true },
+        ).catch(() => {});
+        if (_io) _io.to(`device:${ctx.imei}`).emit('gt06:cmd:ack', {
+          cmd: 'ENGINE_CUT', result: 'speed_limit',
+          message: 'No se puede cortar motor: velocidad > 20 km/h',
+        });
+
+      } else if (resp.text.startsWith('HFYD=Success')) {
+        DeviceState.findOneAndUpdate(
+          { deviceId: ctx.imei },
+          { motorCut: false, updatedAt: new Date() },
+          { upsert: true },
+        ).catch(() => {});
+        if (_io) _io.to(`device:${ctx.imei}`).emit('gt06:cmd:ack', { cmd: 'ENGINE_RESTORE', result: 'success' });
+
+      } else if (resp.text.startsWith('HFYD=Fail')) {
+        if (_io) _io.to(`device:${ctx.imei}`).emit('gt06:cmd:ack', { cmd: 'ENGINE_RESTORE', result: 'fail' });
+
+      } else {
+        log('debug', 'gt06.response.unknown', { imei: ctx.imei, text: resp.text });
+      }
+
+      // Entregar el siguiente comando pendiente si lo hay
+      flushGt06Commands(socket, ctx);
+      break;
+    }
+
     default: {
       // No responder, no cerrar — el device puede enviar protocolos no implementados
       log('info', 'gt06.proto.unsupported', {
@@ -341,7 +579,7 @@ function startGt06Server(io) {
 }
 
 // ─── EXPORTS ─────────────────────────────────────────────────────────────────
-module.exports = { startGt06Server, gt06ConnectedDevices, gt06OnlineImeis };
+module.exports = { startGt06Server, gt06ConnectedDevices, gt06OnlineImeis, sendGt06Command };
 
 
 /* ═══════════════════════════════════════════════════════════
@@ -390,10 +628,18 @@ module.exports = { startGt06Server, gt06ConnectedDevices, gt06OnlineImeis };
    - _io: puede ser null si startGt06Server se llama sin io (test unitario).
      El código lo verifica antes de emitir.
 
+   VARIABLES CRÍTICAS (Fase 2):
+   - gt06CommandQueues: cola persistente por IMEI. No limpiar en 'close' —
+     los comandos deben sobrevivir reconexiones.
+   - gt06LastSentCmds: comando enviado sin confirmar. Limpiar en 'close' y
+     re-encolar para garantía de entrega.
+   - gt06ImeiSockets: socket activo por IMEI. Necesario para entrega inmediata
+     en sendGt06Command(). Limpiar en 'close'.
+   - GT06_COMMAND_MAP: solo ENGINE_CUT y ENGINE_RESTORE tienen frame físico.
+     ARM/DISARM son estado lógico en backend (DeviceState.armed).
+
    DEUDA TÉCNICA:
-   - Fase 2: exponer gt06ConnectedDevices en deviceController para mostrar
-     estado 'connected' en el panel.
-   - Fase 2: cola de comandos GT06 (DYD/HFYD para corte de motor).
    - Fase 3: Alarm Packet 0x16 → push FCM.
+   - Fase 4: device_type en onboarding UI.
 
    ═══════════════════════════════════════════════════════════ */
