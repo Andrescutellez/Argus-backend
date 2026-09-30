@@ -388,6 +388,12 @@ async function initPostgres() {
     )
   `);
 
+  // Migración: columna web_push_subscription para notificaciones push en browser (idempotente).
+  // Almacena el objeto PushSubscription JSON del browser (endpoint + keys).
+  await pool.query(`
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS web_push_subscription JSONB
+  `);
+
   console.log('[PG] Schema listo (users, user_devices, motos, devices, subscriptions, audit_log, manufactured_devices, parking_geofences, system_settings, vehicle_documents, maintenance_records, fuel_logs, expense_logs)');
 }
 

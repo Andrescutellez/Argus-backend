@@ -194,4 +194,34 @@ async function findAllByRole(role) {
   return rows;
 }
 
-module.exports = { findByEmail, findById, createUser, addDevice, getDevices, getDeviceOwner, getAllUsersWithDevices, findAllByRole, saveFcmToken, getOwnerByDeviceId };
+/**
+ * @brief Guarda o actualiza la suscripción Web Push (VAPID) del browser del usuario.
+ * @param {string} userId  UUID
+ * @param {object} sub     PushSubscription serializado (endpoint + keys)
+ */
+async function saveWebPushSub(userId, sub) {
+  await getPool().query(
+    'UPDATE users SET web_push_subscription = $1 WHERE id = $2',
+    [JSON.stringify(sub), userId],
+  );
+}
+
+/**
+ * @brief Retorna fcm_token y web_push_subscription del dueño de un deviceId.
+ * Necesario para enviar push a móvil (FCM) y a browser (VAPID) al mismo tiempo.
+ * @param {string} deviceId
+ * @returns {Promise<{email:string, fcm_token:string|null, web_push_subscription:object|null}|null>}
+ */
+async function getOwnerPushDataByDeviceId(deviceId) {
+  const { rows } = await getPool().query(
+    `SELECT u.email, u.fcm_token, u.web_push_subscription
+     FROM users u
+     JOIN user_devices ud ON ud.user_id = u.id
+     WHERE ud.device_id = $1
+     LIMIT 1`,
+    [deviceId],
+  );
+  return rows[0] ?? null;
+}
+
+module.exports = { findByEmail, findById, createUser, addDevice, getDevices, getDeviceOwner, getAllUsersWithDevices, findAllByRole, saveFcmToken, getOwnerByDeviceId, saveWebPushSub, getOwnerPushDataByDeviceId };

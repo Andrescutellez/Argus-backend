@@ -38,10 +38,11 @@ const { enqueue }    = require('./queue');
 const DeviceState    = require('../models/DeviceState');
 const {
   PROTO_LOGIN, PROTO_LOCATION, PROTO_HEARTBEAT,
-  PROTO_STRING_RESPONSE, PROTO_SERVER_COMMAND,
-  parseFrames, decodeLogin, decodeLocation, decodeHeartbeat, buildAck,
+  PROTO_STRING_RESPONSE, PROTO_ALARM, PROTO_POWER_ALARM, PROTO_SERVER_COMMAND,
+  parseFrames, decodeLogin, decodeLocation, decodeHeartbeat, decodeAlarm, buildAck,
   buildServerCommand, decodeStringResponse,
 } = require('./gt06Parser');
+const { sendGt06AlarmPush } = require('../services/pushService');
 
 // ─── CONSTANTES DE CONFIGURACIÓN ─────────────────────────────────────────────
 
@@ -224,6 +225,69 @@ function sendGt06Command(imei, commandName) {
   }
 
   return true;
+}
+
+// ─── HANDLER DE ALARMAS GT06 ─────────────────────────────────────────────────
+
+/**
+ * @brief Procesa un Alarm Packet (0x16 o 0x18) del J16.
+ *
+ * PROPÓSITO:
+ *   Centraliza la lógica post-alarma: log, socket.io emit al room del device
+ *   y push notification (FCM móvil + Web Push browser) al dueño.
+ *
+ * FLUJO:
+ *   1. Loguear el evento con IMEI, tipo y coordenadas.
+ *   2. alarmType === 0x00 → retornar (movimiento suave, no alertar).
+ *   3. Emitir gt06:alarm al room del device via socket.io.
+ *   4. alarmType === 0x02 → actualizar DeviceState.powerCut = true.
+ *   5. alarmType === 0x03 → solo si DeviceState.armed (evitar push sin armar).
+ *   6. sendGt06AlarmPush() → FCM + Web Push en paralelo.
+ *
+ * @param {string}      imei      IMEI del device
+ * @param {number}      alarmType Byte 31 del alarm packet (0x00/0x02/0x03)
+ * @param {number|null} lat       null si el packet no tiene GPS fix (0x18)
+ * @param {number|null} lon
+ */
+async function handleGt06Alarm(imei, alarmType, lat, lon) {
+  const ALARM_NAMES = { 0x00: 'soft_move', 0x02: 'power_cut', 0x03: 'vibration' };
+  log('info', 'gt06.alarm', {
+    imei,
+    alarmType: `0x${alarmType.toString(16).padStart(2, '0')}`,
+    name:      ALARM_NAMES[alarmType] ?? 'unknown',
+    lat,
+    lon,
+  });
+
+  if (alarmType === 0x00) return; // movimiento suave — sin alerta
+
+  // Emitir al room del device (web + app ya conectadas)
+  if (_io) {
+    _io.to(`device:${imei}`).emit('gt06:alarm', {
+      alarmType, lat, lon, ts: Date.now(),
+    });
+  }
+
+  if (alarmType === 0x02) {
+    // Fuente cortada — actualizar DeviceState sin importar si está armado
+    DeviceState.findOneAndUpdate(
+      { deviceId: imei },
+      { powerCut: true, updatedAt: new Date() },
+      { upsert: true },
+    ).catch(() => {});
+  }
+
+  if (alarmType === 0x03) {
+    // Vibración — verificar que el device esté armado antes de alertar
+    const state = await DeviceState.findOne({ deviceId: imei }).catch(() => null);
+    if (!state?.armed) {
+      log('debug', 'gt06.alarm.ignored.disarmed', { imei });
+      return;
+    }
+  }
+
+  // Push a móvil (FCM) y browser (Web Push) en paralelo — no bloqueante
+  sendGt06AlarmPush(imei, alarmType, lat, lon).catch(() => {});
 }
 
 // ─── HANDLER DE SOCKET ───────────────────────────────────────────────────────
@@ -548,12 +612,67 @@ function handleFrame(socket, ctx, remote, frame) {
       } else if (resp.text.startsWith('HFYD=Fail')) {
         if (_io) _io.to(`device:${ctx.imei}`).emit('gt06:cmd:ack', { cmd: 'ENGINE_RESTORE', result: 'fail' });
 
+      } else if (resp.text.startsWith('DEFENSE_OK')) {
+        // Respuesta a DEFENSE,1# o DEFENSE,0# — el device confirmó el cambio de estado.
+        // Se usa el último comando enviado para saber si fue ARM o DISARM.
+        const lastCmd = gt06LastSentCmds.get(ctx.imei);
+        const armed   = lastCmd?.text === 'DEFENSE,1#';
+        DeviceState.findOneAndUpdate(
+          { deviceId: ctx.imei },
+          { armed, updatedAt: new Date() },
+          { upsert: true },
+        ).catch(() => {});
+        if (_io) {
+          _io.to(`device:${ctx.imei}`).emit('device:state', { armed });
+        }
+        log('info', 'gt06.defense.confirmed', { imei: ctx.imei, armed });
+
       } else {
         log('debug', 'gt06.response.unknown', { imei: ctx.imei, text: resp.text });
       }
 
       // Entregar el siguiente comando pendiente si lo hay
       flushGt06Commands(socket, ctx);
+      break;
+    }
+
+    case PROTO_ALARM: {
+      // Alarm Packet con GPS fix (0x16) — byte 31 = alarm type.
+      // El J16 no espera ACK para este frame (verificado en prod).
+      if (!ctx.loginOk) {
+        log('warn', 'gt06.alarm.no.login', { remote });
+        return;
+      }
+      let alarm;
+      try {
+        alarm = decodeAlarm(frame.data);
+      } catch (err) {
+        log('warn', 'gt06.alarm.decode.error', { remote, imei: ctx.imei, message: err.message });
+        break;
+      }
+      handleGt06Alarm(
+        ctx.imei,
+        alarm.alarmType,
+        alarm.hasFix ? alarm.lat : null,
+        alarm.hasFix ? alarm.lon : null,
+      ).catch(() => {});
+      break;
+    }
+
+    case PROTO_POWER_ALARM: {
+      // Power Alarm sin GPS fix (0x18) — misma estructura pero coordenadas = 0.
+      // Aparece también cada ~5 min como heartbeat; solo actuar si alarm type = 0x02.
+      if (!ctx.loginOk) break;
+      let pAlarm;
+      try {
+        pAlarm = decodeAlarm(frame.data);
+      } catch (err) {
+        log('debug', 'gt06.power.alarm.decode.error', { remote, imei: ctx.imei, message: err.message });
+        break;
+      }
+      // Solo notificar si es un corte real (0x02); los heartbeats periódicos también
+      // llegan como 0x18 con alarmType=0x02 — se procesan igual (idempotente en DeviceState).
+      handleGt06Alarm(ctx.imei, pAlarm.alarmType, null, null).catch(() => {});
       break;
     }
 

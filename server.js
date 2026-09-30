@@ -64,6 +64,7 @@ const settingsRoutes          = require('./routes/settings');             // Rut
 const communityRoutes         = require('./routes/communities');           // Rutas REST comunidades Argus
 const profileRoutes           = require('./routes/profile');               // Rutas REST perfiles sociales
 const garageRoutes            = require('./routes/garage');                 // Rutas REST módulo Garage
+const pushRoutes              = require('./routes/push');                    // Rutas Web Push VAPID — suscripción browser
 const { initGeoStream }       = require('./services/geoStreamService'); // WebSocket GPS para Argus Secure
 const { warmCache: warmCrimeCache } = require('./controllers/crimeController'); // Pre-carga ARI cache
 const { warmGeofenceCache } = require('./tcp/geofenceMonitor');                  // Pre-carga geocercas activas
@@ -292,6 +293,7 @@ app.use('/api/ota',          otaRoutes);
 app.use('/api/communities',  communityRoutes);
 app.use('/api/profile',      profileRoutes);
 app.use('/api/garage',       garageRoutes);
+app.use('/api/push',         pushRoutes);
 
 // ─── 11. MANEJADOR 404 CATCH-ALL ──────────────────────────────────────────────
 // En Express 5 los middlewares de error deben registrarse después de todas

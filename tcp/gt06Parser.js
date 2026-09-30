@@ -72,6 +72,8 @@ const PROTO_LOGIN           = 0x01;
 const PROTO_LOCATION        = 0x12;
 const PROTO_HEARTBEAT       = 0x13;
 const PROTO_STRING_RESPONSE = 0x15; // Terminal → Servidor: respuesta a comando del servidor
+const PROTO_ALARM           = 0x16; // Terminal → Servidor: alarma con GPS fix (Fase 3)
+const PROTO_POWER_ALARM     = 0x18; // Terminal → Servidor: alarma de alimentación (puede ser sin GPS fix)
 const PROTO_SERVER_COMMAND  = 0x80; // Servidor → Terminal: comando SMS (DYD/HFYD/DWXX)
 
 /**
@@ -311,6 +313,82 @@ function decodeHeartbeat(data) {
 }
 
 /**
+ * @brief Decodifica el Alarm Information Packet (Protocol 0x16) y el Power Alarm (0x18).
+ *
+ * PROPÓSITO:
+ *   El J16 emite 0x16 cuando se dispara una alarma con GPS fix. La estructura es
+ *   idéntica al Location Packet (0x12) pero con dos bytes adicionales al final:
+ *   byte 31 = alarm type y byte 32 = idioma. Para 0x18 (sin GPS fix) la estructura
+ *   puede ser más corta; se usa el mismo parser leyendo solo hasta alarm type.
+ *
+ * ALARM TYPES confirmados en producción (J16 firmware GT06_DK12):
+ *   0x00 = movimiento suave (Defense:ON)  — log silencioso, no alertar
+ *   0x02 = fuente externa cortada         — push crítico
+ *   0x03 = golpe/vibración fuerte         — push alarma
+ *
+ * ESTRUCTURA DATA (32 bytes para 0x16):
+ *   [0-5]   YY MM DD HH MM SS  (datetime)
+ *   [6]     GPS info byte (nibble alto = GPS info len, nibble bajo = satélites)
+ *   [7-10]  lat uint32 BE (raw / 30000 = minutos → convertir a decimal degrees)
+ *   [11-14] lon uint32 BE
+ *   [15]    speed km/h
+ *   [16-17] course + status flags (bit3 de [16] = isWest, bit2 = isNorth)
+ *   [18]    LBS tag (0x09)
+ *   [19-20] MCC
+ *   [21]    MNC
+ *   [22-23] LAC
+ *   [24-26] CellID (3 bytes)
+ *   [27]    GSM signal
+ *   [28-29] flags adicionales
+ *   [30]    *** ALARM TYPE ***
+ *   [31]    idioma (0x02 = chino)
+ *
+ * DEPENDENCIAS: ninguna externa (solo Buffer)
+ *
+ * @param {Buffer} data - Campo DATA del frame (mínimo 31 bytes para leer alarm type)
+ * @returns {{
+ *   datetime: Date, lat: number, lon: number, speed: number,
+ *   hasFix: boolean, alarmType: number
+ * }}
+ * @throws {Error} si data tiene menos de 31 bytes
+ */
+function decodeAlarm(data) {
+  if (data.length < 31) throw new Error(`Alarm data too short: ${data.length}`);
+
+  const year   = 2000 + data[0];
+  const month  = data[1];
+  const day    = data[2];
+  const hour   = data[3];
+  const minute = data[4];
+  const second = data[5];
+  const datetime = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+
+  const latRaw = data.readUInt32BE(7);
+  const lonRaw = data.readUInt32BE(11);
+  const speed  = data[15];
+  const csB1   = data[16];
+  const hasFix = !!(csB1 & 0x10);
+  const isWest = !!(csB1 & 0x08);
+  const isNorth= !!(csB1 & 0x04);
+
+  const latMin = latRaw / 30000.0;
+  const lonMin = lonRaw / 30000.0;
+  const latDd  = Math.floor(latMin / 60) + (latMin % 60) / 60;
+  const lonDd  = Math.floor(lonMin / 60) + (lonMin % 60) / 60;
+
+  const alarmType = data[30];
+
+  return {
+    datetime,
+    lat:       isNorth ? latDd : -latDd,
+    lon:       isWest  ? -lonDd : lonDd,
+    speed,
+    hasFix,
+    alarmType,
+  };
+}
+
+/**
  * @brief Construye un paquete ACK para Login (0x01) o Heartbeat (0x13).
  *
  * El device GT06 reconecta si no recibe ACK en 5 segundos. Esta función
@@ -422,12 +500,15 @@ module.exports = {
   PROTO_LOCATION,
   PROTO_HEARTBEAT,
   PROTO_STRING_RESPONSE,
+  PROTO_ALARM,
+  PROTO_POWER_ALARM,
   PROTO_SERVER_COMMAND,
   crcBuffer,
   parseFrames,
   decodeLogin,
   decodeLocation,
   decodeHeartbeat,
+  decodeAlarm,
   buildAck,
   buildServerCommand,
   decodeStringResponse,
