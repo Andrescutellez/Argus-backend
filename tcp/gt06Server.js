@@ -59,7 +59,7 @@ const RATE_LIMIT_MS        = 3_000;   // intervalo mínimo entre ubicaciones ace
 // Para desactivar: GT06_MOTION_PUSH=0 (o quitar la variable) y reiniciar PM2.
 const GT06_MOTION_PUSH     = process.env.GT06_MOTION_PUSH === '1';
 const MOTION_PUSH_GAP_MS   = 120_000; // silencio mínimo: J16 quieto no manda GPS → gap real es de minutos
-const MOTION_PUSH_DEDUP_MS =  30_000; // 30s para suprimir solo el 0x16 inmediato (llega 1-2s después)
+const MOTION_PUSH_DEDUP_MS =  90_000; // 90s: el 0x16 llega hasta ~60s después (TCP reconecta); permite nuevos eventos tras 90s
 
 // ─── MAPEO DE COMANDOS ARGUS → GT06 ──────────────────────────────────────────
 
