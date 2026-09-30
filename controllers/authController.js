@@ -116,12 +116,13 @@ const register = async (req, res) => {
     // Asociar dispositivo si se proporcionó en el registro
     if (deviceId) await User.addDevice(user.id, deviceId);
 
-    const deviceIds = deviceId ? [deviceId] : [];
+    const devices = deviceId ? [{ id: deviceId, protocol: 'argus' }] : [];
+    const deviceIds = devices.map((d) => d.id);
     const token = signToken(user, deviceIds);
 
     return res.status(201).json({
       token,
-      user: { id: user.id, email: user.email, role: user.role, deviceIds },
+      user: { id: user.id, email: user.email, role: user.role, deviceIds, devices },
     });
   } catch (err) {
     console.error('[AUTH] register error:', err.message);
@@ -169,12 +170,13 @@ const login = async (req, res) => {
       return res.status(401).json({ message: 'Credenciales inválidas' });
     }
 
-    const deviceIds = await User.getDevices(user.id);
+    const devices = await User.getDevices(user.id);
+    const deviceIds = devices.map((d) => d.id);
     const token = signToken(user, deviceIds);
 
     return res.status(200).json({
       token,
-      user: { id: user.id, email: user.email, role: user.role, deviceIds },
+      user: { id: user.id, email: user.email, role: user.role, deviceIds, devices },
     });
   } catch (err) {
     console.error('[AUTH] login error:', err.message);
@@ -206,7 +208,8 @@ const me = async (req, res) => {
     const user = await User.findById(req.user.sub);
     if (!user) return res.status(401).json({ message: 'Usuario no encontrado' });
 
-    const deviceIds = await User.getDevices(user.id);
+    const devices = await User.getDevices(user.id);
+    const deviceIds = devices.map((d) => d.id);
 
     // Emitir token fresco con deviceIds actualizados. Necesario porque el token
     // original puede haberse emitido antes de asignar el dispositivo al usuario,
@@ -219,6 +222,7 @@ const me = async (req, res) => {
       email: user.email,
       role: user.role,
       deviceIds,
+      devices,
     });
   } catch (err) {
     return res.status(500).json({ message: 'Error interno del servidor' });

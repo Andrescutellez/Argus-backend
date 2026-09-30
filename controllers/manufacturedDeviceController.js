@@ -25,22 +25,26 @@ const { log } = require('../models/AuditLog');
  * @param {import('express').Request}  req  Body: { deviceId, notes? }
  * @param {import('express').Response} res  201: device registrado | 400: falta deviceId
  */
+const VALID_PROTOCOLS = ['argus', 'gt06'];
+
 const addDevice = async (req, res) => {
-  const { deviceId, imei, notes } = req.body ?? {};
+  const { deviceId, imei, notes, protocol } = req.body ?? {};
 
   if (!deviceId || typeof deviceId !== 'string' || !deviceId.trim()) {
     return res.status(400).json({ message: 'deviceId requerido' });
   }
 
+  const proto = VALID_PROTOCOLS.includes(protocol) ? protocol : 'argus';
+
   try {
-    const device = await ManufacturedDevice.addDevice(deviceId.trim(), imei ?? null, notes ?? null);
+    const device = await ManufacturedDevice.addDevice(deviceId.trim(), imei ?? null, notes ?? null, proto);
 
     await log({
       userId: req.user.sub,
       action: 'MANUFACTURED_DEVICE_ADD',
       targetType: 'manufactured_device',
       targetId: deviceId,
-      metadata: { imei, notes },
+      metadata: { imei, notes, protocol: proto },
     });
 
     return res.status(201).json(device);

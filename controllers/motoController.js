@@ -189,8 +189,11 @@ const assignDevice = async (req, res) => {
     await Device.createDevice({ deviceId });
     const device = await Device.assignToMoto(deviceId, moto.id);
 
+    // Leer el protocolo del catálogo para propagarlo a user_devices
+    const protocol = await ManufacturedDevice.getProtocol(deviceId);
+
     // Vincular el device al usuario para que canAccessDevice y el JWT funcionen
-    await User.addDevice(req.user.sub, deviceId);
+    await User.addDevice(req.user.sub, deviceId, protocol);
 
     await log({
       userId: req.user.sub,

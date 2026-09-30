@@ -35,13 +35,13 @@ const { getPool } = require('../config/postgres');
  * @param {string} [notes]  — Notas opcionales (lote, cliente destino, etc.).
  * @returns {Promise<object>} Fila insertada.
  */
-async function addDevice(deviceId, imei = null, notes = null) {
+async function addDevice(deviceId, imei = null, notes = null, protocol = 'argus') {
   const { rows } = await getPool().query(
-    `INSERT INTO manufactured_devices (device_id, imei, notes)
-     VALUES ($1, $2, $3)
-     ON CONFLICT (device_id) DO UPDATE SET imei = EXCLUDED.imei, notes = EXCLUDED.notes
+    `INSERT INTO manufactured_devices (device_id, imei, notes, device_protocol)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (device_id) DO UPDATE SET imei = EXCLUDED.imei, notes = EXCLUDED.notes, device_protocol = EXCLUDED.device_protocol
      RETURNING *`,
-    [deviceId, imei, notes],
+    [deviceId, imei, notes, protocol],
   );
   return rows[0];
 }
@@ -78,9 +78,17 @@ async function isManufactured(deviceId) {
  */
 async function listAll() {
   const { rows } = await getPool().query(
-    `SELECT device_id, registered_at, notes FROM manufactured_devices ORDER BY registered_at DESC`,
+    `SELECT device_id, imei, device_protocol, registered_at, notes FROM manufactured_devices ORDER BY registered_at DESC`,
   );
   return rows;
+}
+
+async function getProtocol(deviceId) {
+  const { rows } = await getPool().query(
+    `SELECT device_protocol FROM manufactured_devices WHERE device_id = $1 LIMIT 1`,
+    [deviceId],
+  );
+  return rows[0]?.device_protocol ?? 'argus';
 }
 
 /**
@@ -102,7 +110,7 @@ async function removeDevice(deviceId) {
   return rowCount > 0;
 }
 
-module.exports = { addDevice, isManufactured, listAll, removeDevice };
+module.exports = { addDevice, isManufactured, listAll, getProtocol, removeDevice };
 
 
 /* ═══════════════════════════════════════════════════════════

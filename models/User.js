@@ -68,26 +68,26 @@ async function createUser({ email, passwordHash, role = 'USER' }) {
  * @param {string} deviceId  p.ej. 'ARGUS-1237E630'
  * @returns {Promise<void>}
  */
-async function addDevice(userId, deviceId) {
+async function addDevice(userId, deviceId, protocol = 'argus') {
   await getPool().query(
-    `INSERT INTO user_devices (user_id, device_id)
-     VALUES ($1, $2)
-     ON CONFLICT DO NOTHING`,
-    [userId, deviceId],
+    `INSERT INTO user_devices (user_id, device_id, device_protocol)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (user_id, device_id) DO UPDATE SET device_protocol = EXCLUDED.device_protocol`,
+    [userId, deviceId, protocol],
   );
 }
 
 /**
- * @brief Retorna los deviceIds asociados a un usuario.
+ * @brief Retorna los devices asociados a un usuario con su protocolo.
  * @param {string} userId  UUID
- * @returns {Promise<string[]>} Array de deviceIds.
+ * @returns {Promise<{id: string, protocol: string}[]>}
  */
 async function getDevices(userId) {
   const { rows } = await getPool().query(
-    'SELECT device_id FROM user_devices WHERE user_id = $1',
+    'SELECT device_id, device_protocol FROM user_devices WHERE user_id = $1',
     [userId],
   );
-  return rows.map((r) => r.device_id);
+  return rows.map((r) => ({ id: r.device_id, protocol: r.device_protocol ?? 'argus' }));
 }
 
 /**
