@@ -61,21 +61,17 @@ const RATE_LIMIT_MS   = 3_000;   // intervalo mínimo entre ubicaciones aceptada
 const GT06_COMMAND_MAP = {
   ENGINE_CUT:     'DYD,000000#',   // Cortar combustible. Rechazado si velocidad > 20 km/h.
   ENGINE_RESTORE: 'HFYD,000000#',  // Restaurar combustible.
-  // Diagnóstico temporal — vibration alarm (SENALM). Remover tras confirmar soporte.
-  SENALM_QUERY:   'SENALM#',
-  SENALM_ON:      'SENALM,ON,0#',  // Activar solo GPRS (sin SMS ni llamada)
-  SENALM_OFF:     'SENALM,OFF#',
-  // Diagnóstico temporal — estado y parámetros del device
+  // ARM/DISARM activan/desactivan el Defense mode del J16 (acelerómetro + alerta GPRS).
+  // DEFENSE,1# confirmado en prod con firmware GT06_DK12 — responde DEFENSE_OK.
+  ARM:            'DEFENSE,1#',
+  DISARM:         'DEFENSE,0#',
+  // Diagnóstico temporal — estado, parámetros y vibración. Remover tras Fase 3.
   STATUS_QUERY:   'STATUS#',
   PARAM_QUERY:    'PARAM#',
-  // Diagnóstico temporal — Defense mode (ARM físico del J16), variantes de sintaxis
-  DEFENSE_ON:     'DEFENSE,ON#',
-  DEFENSE_OFF:    'DEFENSE,OFF#',
+  SENALM_QUERY:   'SENALM#',
+  SENALM_ON:      'SENALM,ON,0#',
+  SENALM_OFF:     'SENALM,OFF#',
   DEFENSE_QUERY:  'DEFENSE#',
-  DEFENSE_ON_1:   'DEFENSE,1#',
-  DEFENSE_OFF_0:  'DEFENSE,0#',
-  DEF_ON:         'DEF,ON#',
-  ALARM_ON:       'ALARM,1#',
 };
 
 // ─── ESTADO COMPARTIDO ───────────────────────────────────────────────────────
