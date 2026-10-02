@@ -260,8 +260,9 @@ function sendGt06Command(imei, commandName) {
  * @param {number}      alarmType Byte 31 del alarm packet (0x00/0x02/0x03)
  * @param {number|null} lat       null si el packet no tiene GPS fix (0x18)
  * @param {number|null} lon
+ * @param {boolean}     armed     Estado armado del device en el momento del evento (ctx.armed)
  */
-async function handleGt06Alarm(imei, alarmType, lat, lon) {
+async function handleGt06Alarm(imei, alarmType, lat, lon, armed) {
   const ALARM_NAMES = { 0x00: 'soft_move', 0x02: 'power_cut', 0x03: 'vibration' };
   log('info', 'gt06.alarm', {
     imei,
@@ -272,6 +273,13 @@ async function handleGt06Alarm(imei, alarmType, lat, lon) {
   });
 
   if (alarmType === 0x00) return; // movimiento suave — sin alerta
+
+  // El J16 manda 0x03 independientemente de su estado Defense en hardware.
+  // Confirmado en campo: llega con Defense:OFF. Filtrar aquí por estado lógico.
+  if (alarmType === 0x03 && !armed) {
+    log('debug', 'gt06.alarm.skipped.disarmed', { imei, alarmType: '0x03' });
+    return;
+  }
 
   // Emitir al room del device (web + app ya conectadas)
   if (_io) {
@@ -288,10 +296,6 @@ async function handleGt06Alarm(imei, alarmType, lat, lon) {
       { upsert: true },
     ).catch(() => {});
   }
-
-  // Para 0x03 (vibración): el J16 solo emite este packet cuando Defense:ON está activo
-  // en el propio hardware — no hace falta verificar DeviceState.armed en backend.
-  // El device es la fuente de verdad sobre su propio estado de defensa.
 
   // En modo GT06_MOTION_PUSH el push ya se envió al recibir la ubicación previa.
   // Suprimir para evitar notificación duplicada al usuario.
@@ -692,6 +696,7 @@ function handleFrame(socket, ctx, remote, frame) {
         alarm.alarmType,
         alarm.hasFix ? alarm.lat : null,
         alarm.hasFix ? alarm.lon : null,
+        ctx.armed,
       ).catch(() => {});
       break;
     }
@@ -709,7 +714,7 @@ function handleFrame(socket, ctx, remote, frame) {
       }
       // Solo notificar si es un corte real (0x02); los heartbeats periódicos también
       // llegan como 0x18 con alarmType=0x02 — se procesan igual (idempotente en DeviceState).
-      handleGt06Alarm(ctx.imei, pAlarm.alarmType, null, null).catch(() => {});
+      handleGt06Alarm(ctx.imei, pAlarm.alarmType, null, null, ctx.armed).catch(() => {});
       break;
     }
 
